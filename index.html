@@ -65,6 +65,21 @@ input[type="range"] { padding: 0; accent-color: var(--accent); }
 .tab.active { color: var(--accent2); border-bottom-color: var(--accent); }
 .tab-panel { display: none; }
 .tab-panel.active { display: block; }
+.intro-card { max-width: 980px; }
+.blog-content { color: var(--text); font-size: 14px; line-height: 1.72; }
+.blog-content h1 { font-size: 24px; line-height: 1.22; margin-bottom: 16px; }
+.blog-content h2 { font-size: 17px; margin: 24px 0 10px; color: var(--accent2); }
+.blog-content h3 { font-size: 15px; margin: 18px 0 8px; }
+.blog-content p { margin: 10px 0; color: var(--text); }
+.blog-content a { color: var(--cyan); text-decoration: none; }
+.blog-content a:hover { text-decoration: underline; }
+.blog-content ul, .blog-content ol { margin: 10px 0 10px 22px; }
+.blog-content li { margin: 5px 0; }
+.blog-content code { background: var(--surface2); border: 1px solid var(--border); border-radius: 4px; padding: 1px 5px; font-size: 12px; }
+.blog-content pre { margin: 12px 0; padding: 12px; overflow-x: auto; background: #0b0d13; border: 1px solid var(--border); border-radius: 8px; }
+.blog-content pre code { border: 0; background: transparent; padding: 0; color: var(--text); }
+.blog-content table { margin: 12px 0 16px; }
+.blog-content blockquote { margin: 12px 0; padding: 8px 12px; border-left: 3px solid var(--accent); background: rgba(124,110,240,0.08); color: var(--text2); }
 
 /* Cards & metrics */
 .card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 16px; }
@@ -402,7 +417,8 @@ canvas { width: 100%; max-height: 350px; }
   <!-- Content -->
   <div class="content">
     <div class="tabs">
-      <div class="tab active" data-tab="overview">Overview</div>
+      <div class="tab active" data-tab="intro">Intro</div>
+      <div class="tab" data-tab="overview">Overview</div>
       <div class="tab" data-tab="pareto">Pareto Frontier</div>
       <div class="tab" data-tab="modifier">Pareto Modifier</div>
       <div class="tab" data-tab="delta-influence">Delta Influence</div>
@@ -413,8 +429,15 @@ canvas { width: 100%; max-height: 350px; }
       <div class="tab" data-tab="throughput">Throughput</div>
     </div>
 
+    <!-- Intro -->
+    <div id="intro" class="tab-panel active">
+      <div class="card intro-card">
+        <div id="intro-blog" class="blog-content">Loading blog.md...</div>
+      </div>
+    </div>
+
     <!-- Overview -->
-    <div id="overview" class="tab-panel active">
+    <div id="overview" class="tab-panel">
       <div id="stats-bar" class="stats-bar"></div>
       <div class="grid-2">
         <div class="card" id="optimal-card"></div>
@@ -866,4 +889,4 @@ canvas { width: 100%; max-height: 350px; }
 <script src="compiler-data-003.js"></script>
 <script src="compiler-data-004.js"></script>
 <script src="data-loader.js"></script>
-<script src="app.js"></script>
+<script src="app.js?v=blog-live-3"></script>

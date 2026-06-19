@@ -869,6 +869,169 @@ Object.entries(_byGroup).forEach(([groupName, entries]) => {
 });
 
 // Tabs
+let _introLoaded = false;
+
+function escapeHtml(s) {
+  return String(s ?? "").replace(/[&<>"']/g, ch => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    "\"": "&quot;",
+    "'": "&#39;"
+  }[ch]));
+}
+
+function renderInlineMarkdown(text) {
+  const code = [];
+  let s = escapeHtml(text).replace(/`([^`]+)`/g, (_, inner) => {
+    const idx = code.push(inner) - 1;
+    return `@@CODE${idx}@@`;
+  });
+  s = s.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_, label, href) => {
+    const safeHref = href.trim().toLowerCase().startsWith("javascript:") ? "#" : href.trim();
+    return `<a href="${escapeHtml(safeHref)}" target="_blank" rel="noopener noreferrer">${label}</a>`;
+  });
+  s = s.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+  s = s.replace(/(^|[^*])\*([^*]+)\*/g, "$1<em>$2</em>");
+  code.forEach((inner, idx) => {
+    s = s.replace(`@@CODE${idx}@@`, `<code>${inner}</code>`);
+  });
+  return s;
+}
+
+function renderMarkdown(md) {
+  const lines = String(md || "").replace(/\r\n/g, "\n").split("\n");
+  const html = [];
+  let inCode = false, codeLines = [], listType = null;
+  const closeList = () => {
+    if (listType) {
+      html.push(`</${listType}>`);
+      listType = null;
+    }
+  };
+  const flushCode = () => {
+    html.push(`<pre><code>${escapeHtml(codeLines.join("\n"))}</code></pre>`);
+    codeLines = [];
+  };
+  for (let i = 0; i < lines.length; i++) {
+    const raw = lines[i], line = raw.trim();
+    if (line.startsWith("```")) {
+      if (inCode) {
+        flushCode();
+        inCode = false;
+      } else {
+        closeList();
+        inCode = true;
+      }
+      continue;
+    }
+    if (inCode) {
+      codeLines.push(raw);
+      continue;
+    }
+    if (!line) {
+      closeList();
+      continue;
+    }
+    const next = (lines[i + 1] || "").trim();
+    if (line.startsWith("|") && next.startsWith("|") && /^\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?$/.test(next)) {
+      closeList();
+      const rows = [];
+      while (i < lines.length && lines[i].trim().startsWith("|")) rows.push(lines[i++].trim());
+      i -= 1;
+      const cells = row => row.replace(/^\||\|$/g, "").split("|").map(c => renderInlineMarkdown(c.trim()));
+      const header = cells(rows[0]);
+      const body = rows.slice(2).map(cells);
+      html.push(`<table><thead><tr>${header.map(c => `<th>${c}</th>`).join("")}</tr></thead><tbody>${body.map(r => `<tr>${r.map(c => `<td>${c}</td>`).join("")}</tr>`).join("")}</tbody></table>`);
+      continue;
+    }
+    const heading = line.match(/^(#{1,3})\s+(.+)$/);
+    if (heading) {
+      closeList();
+      const level = heading[1].length;
+      html.push(`<h${level}>${renderInlineMarkdown(heading[2])}</h${level}>`);
+      continue;
+    }
+    const quote = line.match(/^>\s+(.+)$/);
+    if (quote) {
+      closeList();
+      html.push(`<blockquote>${renderInlineMarkdown(quote[1])}</blockquote>`);
+      continue;
+    }
+    const bullet = line.match(/^[-*]\s+(.+)$/);
+    const numbered = line.match(/^\d+\.\s+(.+)$/);
+    if (bullet || numbered) {
+      const wanted = bullet ? "ul" : "ol";
+      if (listType !== wanted) {
+        closeList();
+        listType = wanted;
+        html.push(`<${wanted}>`);
+      }
+      html.push(`<li>${renderInlineMarkdown((bullet || numbered)[1])}</li>`);
+      continue;
+    }
+    closeList();
+    html.push(`<p>${renderInlineMarkdown(line)}</p>`);
+  }
+  if (inCode) flushCode();
+  closeList();
+  return html.join("\n");
+}
+
+const INTRO_ASSET_BASE = (() => {
+  const appScript = Array.from(document.scripts).find(s => (s.src || "").includes("app.js"));
+  return new URL(".", appScript?.src || window.location.href);
+})();
+
+function introBlogUrls() {
+  const urls = [
+    new URL("blog.md", INTRO_ASSET_BASE),
+    new URL("blog.md", window.location.href),
+  ];
+  if (window.location.protocol.startsWith("http")) {
+    urls.push(new URL("/blog.md", window.location.origin));
+    urls.push(new URL("/v1-web/blog.md", window.location.origin));
+    urls.push(new URL("/v1-ac-solver/blog.md", window.location.origin));
+  }
+  const seen = new Set();
+  return urls
+    .filter(u => {
+      const key = u.href;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .map(u => {
+      u.searchParams.set("ts", Date.now());
+      return u.href;
+    });
+}
+
+async function loadIntro() {
+  const host = document.getElementById("intro-blog");
+  if (!host || _introLoaded) return;
+  const errors = [];
+  try {
+    for (const url of introBlogUrls()) {
+      try {
+        const res = await fetch(url, { cache: "no-store" });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        host.innerHTML = renderMarkdown(await res.text());
+        _introLoaded = true;
+        return;
+      } catch (err) {
+        errors.push(`${url}: ${err.message || err}`);
+      }
+    }
+    throw new Error(errors.join("; "));
+  } catch (err) {
+    const fileHint = window.location.protocol === "file:"
+      ? `<p style="color:var(--text2);">This page is open as <code>file://</code>. Browsers block JavaScript from reading sibling markdown files in that mode; serve <code>v1-web/</code> over HTTP.</p>`
+      : "";
+    host.innerHTML = `<h1>Intro</h1><p style="color:var(--text2);">Could not load <code>blog.md</code>.</p>${fileHint}<p style="color:var(--text2);font-size:12px;">Tried: ${escapeHtml(errors.join(" | "))}</p>`;
+  }
+}
+
 document.querySelectorAll(".tab").forEach(t => {
   t.onclick = () => {
     document.querySelectorAll(".tab").forEach(x => x.classList.remove("active"));
@@ -876,6 +1039,7 @@ document.querySelectorAll(".tab").forEach(t => {
     t.classList.add("active");
     document.getElementById(t.dataset.tab).classList.add("active");
     setTimeout(() => {
+      if (t.dataset.tab === "intro") loadIntro();
       if (t.dataset.tab === "pareto") renderPareto(current());
       if (t.dataset.tab === "modifier") renderModifier();
       if (t.dataset.tab === "delta-influence") renderDeltaInfluence();
@@ -4618,4 +4782,5 @@ function initThroughputOnce() {
 }
 
 // Init
+loadIntro();
 updateAll();
