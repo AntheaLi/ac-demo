@@ -94,4 +94,4 @@ ac-delta-eval \
   --out out/mistral_delta_gqa
 ```
 
-Repository, full docs, and the public-benchmark validation pack at [github.com/AntheaLi/AC](https://github.com/AntheaLi/AC).
+Repository, full docs at [github.com/AntheaLi/AC](https://github.com/AntheaLi/AC).
