@@ -66,7 +66,7 @@ ac-compile --help
 
 Apache-2.0. Python ≥ 3.10. No runtime dependencies beyond PyYAML.
 
-## Try it
+## Use
 
 ```bash
 # Optimal 7B dense architecture for an H100 cluster
@@ -74,9 +74,6 @@ ac-compile --hardware h100 --params 7 --tokens 2 \
   --context 8192 --serving-tbt 50 --serving-batch 32 \
   --tp 8 --pp 1 --dp 8 --output-config out/arch.json
 
-# Diagnose your existing model's binding stresses
-ac-stress transition --known Llama-3-70B --hw h100 \
-  --batch 32 --decode-kv 8192 --tp 8
 
 # Score a specific change against your baseline
 ac-delta-eval --baseline-config configs/mistral_7b.json \
@@ -84,4 +81,4 @@ ac-delta-eval --baseline-config configs/mistral_7b.json \
   --apply swap_attention_to_mla --apply-args latent_dim=512
 ```
 
-Repository, full docs, and the public-benchmark validation pack at [github.com/AntheaLi/AC](https://github.com/AntheaLi/AC).
+Repository, full docs at [github.com/AntheaLi/AC](https://github.com/AntheaLi/AC).
