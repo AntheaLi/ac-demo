@@ -1,4 +1,6 @@
-# AC 算模 - a Hardware-Aware Architecture Compiler for Transformers
+# AC 算模 
+
+### a Hardware-Aware Architecture Compiler for Transformers
 
 Architecture choices are currently made through a mix of convention, scaling laws, intuition, and expensive ablations. But many choices are hardware-coupled: GQA/MLA affects KV bandwidth, width/depth affects latency and parallelism, MoE changes active vs total capacity, precision changes both quality risk and throughput, and hybrid state/attention ratios depend on recall vs memory pressure.
 
@@ -58,13 +60,15 @@ The goal is to make architecture design less like folklore and more like hardwar
 ## Install
 
 ```bash
+git clone https://github.com/AntheaLi/AC.git
+cd AC
 pip install -e .
 ac-compile --help
 ```
 
 Apache-2.0. Python ≥ 3.10. No runtime dependencies beyond PyYAML.
 
-## Try it
+## 
 
 ```bash
 # Optimal 7B dense architecture for an H100 cluster
