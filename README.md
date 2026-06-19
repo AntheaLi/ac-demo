@@ -34,7 +34,7 @@ Current implementation looks at: width/depth, MLP-attention ratio, query/KV head
 
 - **Attention**: MHA, GQA, MQA, MLA (DeepSeek-V2/V3), NSA (Native Sparse Attention), SWA, YOCO.
 - **FFN**: dense SwiGLU, top-k MoE with shared experts and capacity factors, first-K-dense MoE prefixes (DeepSeek-V3 / Qwen3-MoE style).
-- **State / hybrid layers**: Mamba-2, GLA, KDA, DeltaNet, Gated DeltaNet, RWKV-7, RetNet, parallel-heads, sliding-window recurrent. Five quality-residual families covering the published behaviors of each.
+- **State / hybrid layers**: Mamba-2, GLA, KDA, DeltaNet, Gated DeltaNet, parallel-heads, sliding-window recurrent. Five quality-residual families covering the published behaviors of each.
 - **Long context**: position interpolation, NTK-aware, YaRN, LongRoPE, with their measured long-context degradation multipliers.
 - **Precision**: BF16, FP8 (E4M3/E5M2), FP4 (E2M1), MXFP4, MXFP6, INT8/INT4 KV, per-component assignment.
 - **Multi-token prediction** (DeepSeek-V3-style), 2:4 structured sparsity.
