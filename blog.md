@@ -68,22 +68,30 @@ ac-compile --help
 
 Apache-2.0. Python ≥ 3.10. No runtime dependencies beyond PyYAML.
 
-## 
+## Use
 
 ```bash
-# Optimal 7B dense architecture for an H100 cluster
-ac-compile --hardware h100 --params 7 --tokens 2 \
-  --context 8192 --serving-tbt 50 --serving-batch 32 \
-  --tp 8 --pp 1 --dp 8 --output-config out/arch.json
+# 1) Greenfield: 7B dense on H100
+ac-compile \
+  --hardware h100 --params 7 --tokens 2 --context 8192 \
+  --serving-tbt 50 --serving-batch 32 --tp 8 --pp 1 --dp 8 \
+  --output-config out/mistral_arch.json \
+  --output-justification out/mistral_arch.md \
+  --output-pareto out/mistral_pareto.csv
 
-# Diagnose your existing model's binding stresses
-ac-stress transition --known Llama-3-70B --hw h100 \
-  --batch 32 --decode-kv 8192 --tp 8
+# 2) Modifier: Pareto-front delta against Mistral-7B
+ac-compile \
+  --baseline-config configs/mistral_7b.json \
+  --hardware h100 --tp-options 4,8 \
+  --quality-risk-budget-pct 1.0 --allow-quality-spending \
+  --out out/mistral_modifier
 
-# Score a specific change against your baseline
-ac-delta-eval --baseline-config configs/mistral_7b.json \
+# 3) Delta influence: what does GQA(group_size=8) do to Mistral-7B at 32k?
+ac-delta-eval \
+  --baseline-config configs/mistral_7b.json \
   --hardware h100 --tp 8 --workload long_context \
-  --apply swap_attention_to_mla --apply-args latent_dim=512
+  --apply swap_attention_to_gqa --apply-args group_size=8 \
+  --out out/mistral_delta_gqa
 ```
 
 Repository, full docs, and the public-benchmark validation pack at [github.com/AntheaLi/AC](https://github.com/AntheaLi/AC).
