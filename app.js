@@ -3954,8 +3954,10 @@ function renderCompare() {
 // ======================
 // Tile Lattice tab — lazy init
 // ======================
-// Deploy build is self-contained; lattice data is computed from the JS
-// HARDWARE table and no sidecar lattice JSON is required.
+// All computation is client-side. lattice_data.json is fetched in the
+// background on first activation so the precomputed grid is available
+// for any future enhancements (current panels recompute on demand from
+// the JS HARDWARE table).
 let _tileLatticeInited = false;
 let _tileLatticeData = null;
 function initTileLatticeOnce() {
