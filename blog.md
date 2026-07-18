@@ -7,7 +7,7 @@ Architecture choices are currently made through a mix of convention, scaling law
 
 AC turns hardware + workload + architecture constraints into executable architecture search. It supports greenfield design, baseline-aware local modification, and delta influence evaluation. It takes three inputs:
 
-1. **Hardware** — H100 SXM, B200, TPU v5p, Trainium 2/3 (more targets landing as calibration packs ship).
+1. **Hardware** — H100 SXM, H800 SXM, B200, GB200 NVL72, TPU v5p/v5e, and Trainium 2/3.
 2. **Workload** — context length, serving batch, latency budget (TBT/TTFT), training token count.
 3. **Quality budget** — how much loss you're willing to spend for throughput.
 
@@ -28,17 +28,18 @@ The useful output is not “the optimal architecture.” The useful output is a 
 
 ## Currently Supported
 
-Current implementation looks at: width/depth, MLP-attention ratio, query/KV head split, GQA group size, KV memory, precision policy, MoE active vs total capacity, hybrid state/attention ratio, uncertainty.
+AC searches tile-aligned width/depth, MLP-to-attention ratio, query/KV head split, vocabulary size, precision policy, active versus total parameters, hybrid composition, and parallelism under memory, latency, quality-risk, and hardware-fabric constraints.
 
-- **Attention**: MHA, GQA, MQA, MLA (DeepSeek-V2/V3), NSA (Native Sparse Attention), CSA, IndexShare, MSA, SWA, YOCO.
-- **FFN**: dense SwiGLU, top-k MoE with shared experts and capacity factors, first-K-dense MoE prefixes (DeepSeek-V3 / Qwen3-MoE style).
-- **State / hybrid layers**: Mamba-2, GLA, KDA, DeltaNet, Gated DeltaNet, RWKV-7, RetNet, parallel-heads, sliding-window recurrent. Five quality-residual families covering the published behaviors of each.
-- **Long context**: position interpolation, NTK-aware, YaRN, LongRoPE, with their measured long-context degradation multipliers.
-- **Precision**: BF16, FP8 (E4M3/E5M2), FP4 (E2M1), MXFP4, MXFP6, INT8/INT4 KV, per-component assignment.
-- **Multi-token prediction** (DeepSeek-V3-style), 2:4 structured sparsity.
-- **Parallelism**: TP, PP, DP, EP, and context-parallel (ring or Ulysses) sweeps.
+- **Hardware**: NVIDIA H100 SXM, H800 SXM, B200, and rack-scale GB200 NVL72; Google TPU v5p/v5e; AWS Trainium 2/3. The system-level targets model their fabric, including NVL72 expert-parallel domains and H800's reduced NVLink bandwidth.
+- **Attention and KV cache**: full attention with MHA/GQA/MQA, MLA (DeepSeek-V2/V3), NSA, CSA, IndexShare, MSA, sliding-window attention, local/global interleaving, and YOCO cross-layer KV sharing.
+- **FFN**: dense SwiGLU; top-k MoE with optional shared experts, capacity factors, fine- or coarse-grained experts, and EP topology; first-K-dense MoE prefixes in the DeepSeek-V3/Qwen3-MoE style.
+- **State and hybrid layers**: Mamba-2/Mamba/S4-S6; GLA, KDA, DeltaNet, and Gated DeltaNet; RWKV-7, RetNet, and linear attention; parallel-head hybrids; sliding-window/local-recurrent hybrids. Placement can be interleaved, periodic, or first-periodic-last, with hardware-derived state sizing.
+- **Long context**: local/global attention, Position Interpolation, NTK-aware scaling, YaRN, LongRoPE, and context parallelism with ring or Ulysses communication.
+- **Precision**: BF16/FP16, FP8, FP4, MXFP4, and MXFP6 for supported compute paths; BF16, FP8, INT8, FP4, and INT4 KV cache. Unsupported formats are filtered by hardware, and weight, activation/FFN, state, and KV precision remain distinct.
+- **Other primitives**: Multi-Token Prediction and RMSNorm. Component-level 2:4 structured sparsity is represented in the quality model, but is not yet a greenfield search axis.
+- **Parallelism**: TP, PP, EP, and CP sweeps, plus candidate-specific DP derived from a fixed training-cluster budget. Reports distinguish per-GPU, per-replica, and aggregate throughput.
 
-All of it searched together. The optimizer doesn't make you pick "MoE vs hybrid" up front; combined MoE + hybrid + MLA candidates compete on the same Pareto frontier.
+Optional architecture families enter greenfield search through explicit CLI flags. Once enabled, they are evaluated in the same lattice, so combinations such as MoE + hybrid + MLA can compete on one Pareto frontier. Modifier mode preserves the baseline family; explicit family transitions belong in delta evaluation.
 
 ## AC is NOT a replacement for training. 
 

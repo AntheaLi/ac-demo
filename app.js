@@ -286,6 +286,7 @@ PARAM_TARGETS.forEach(target => {
   const p = target.value;
   const d = document.createElement("div");
   d.className = "pill" + (p === state.params ? " active" : "");
+  d.dataset.params = p;
   d.innerHTML = `<span class="pill-main">${target.label}</span>`;
   d.title = target.note || `${target.label} parameter target`;
   d.onclick = () => { state.params = p; updateAll(); };
@@ -293,18 +294,37 @@ PARAM_TARGETS.forEach(target => {
 });
 
 const tokenSel = document.getElementById("sel-tokens");
-// Wave 44: the grid is regenerated at a single Chinchilla-scale token
-// count (20T). Drive the selector from the payload so it can never
-// advertise token counts the data doesn't have.
+// Drive the selector from the payload so it can never advertise token
+// counts the active hardware/parameter/context cell does not contain.
 const TOKEN_OPTIONS = [...new Set((DATA.grid || []).map(g => g.tokens_T))]
   .filter(t => t > 0).sort((a, b) => a - b);
-(TOKEN_OPTIONS.length ? TOKEN_OPTIONS : [20]).forEach(t => {
-  const o = document.createElement("option");
-  o.value = t; o.textContent = t + "T tokens";
-  tokenSel.appendChild(o);
-});
-tokenSel.value = state.tokens;
-tokenSel.onchange = () => { state.tokens = parseFloat(tokenSel.value); updateAll(); };
+
+function tokenOptionsForState() {
+  const local = [...new Set(GRID.filter(g =>
+    g.hw === state.hw && g.params_B === state.params &&
+    g.serving === state.serving && _ctxMatches(g, state.contextLength)
+  ).map(g => g.tokens_T))].filter(t => t > 0).sort((a, b) => a - b);
+  return local.length ? local : (TOKEN_OPTIONS.length ? TOKEN_OPTIONS : [20]);
+}
+
+function syncTokenSelector() {
+  const options = tokenOptionsForState();
+  if (!options.includes(state.tokens)) state.tokens = options[0];
+  tokenSel.replaceChildren(...options.map(t => {
+    const o = document.createElement("option");
+    o.value = t;
+    o.textContent = `${t}T tokens`;
+    return o;
+  }));
+  tokenSel.value = String(state.tokens);
+}
+
+syncTokenSelector();
+tokenSel.onchange = () => {
+  const tokens = Number(tokenSel.value);
+  if (Number.isFinite(tokens) && TOKEN_OPTIONS.includes(tokens)) state.tokens = tokens;
+  updateAll();
+};
 
 const servingSel = document.getElementById("sel-serving");
 const servingOptions = AVAILABLE_SERVING_MODES.length
@@ -2078,9 +2098,14 @@ function modifierScore(r, base) {
 // Update all
 // ======================
 function updateAll() {
+  // Hardware, parameter, serving, and context changes can alter which token
+  // budgets exist. Reconcile before reading the selected grid cell.
+  syncTokenSelector();
+
   // Update control styles
   document.querySelectorAll(".hw-card").forEach(c => c.classList.toggle("active", c.dataset.hw === state.hw));
-  document.querySelectorAll("#param-pills .pill").forEach((p, i) => p.classList.toggle("active", PARAM_TARGETS[i].value === state.params));
+  document.querySelectorAll("#param-pills .pill").forEach(p =>
+    p.classList.toggle("active", Number(p.dataset.params) === state.params));
   document.querySelectorAll("#ffn-toggles .pill").forEach(p => p.classList.toggle("active", state.ffnTypes.has(p.dataset.ffn)));
   document.querySelectorAll("#layer-toggles .pill").forEach(p => p.classList.toggle("active", state.layerTypes.has(p.dataset.layer)));
 
@@ -2115,7 +2140,7 @@ function updateAll() {
     ? `TP=${tp} · PP=${pp} · CP=${cp} · DP=${dp} · EP=${ep}<br>${nodeNote}<br>Serving instance: ${servingGpus} GPUs<br>Training cluster: ${trainingGpus} GPUs / ${trainingNodes} nodes`
     : `No feasible parallelism topology<br>Training cluster target: ${entry ? (entry.training_cluster_gpus || 64) : "?"} GPUs`;
   document.getElementById("config-summary").innerHTML =
-    `${topologySummary}<br>Context: ${ctxLabel(state.contextLength)}<br>Vocab: 32,000<br>` +
+    `${topologySummary}<br>Training tokens: ${state.tokens}T<br>Context: ${ctxLabel(state.contextLength)}<br>Vocab: 32,000<br>` +
     provenanceText +
     `${meta.note ? `<br>${meta.note}` : ""}` +
     `${REFERENCE_MODELS[state.params] ? `<br>Ref: ${REFERENCE_MODELS[state.params].map(r => r.name).join(", ")}` : ""}`;
@@ -4115,7 +4140,7 @@ function renderShadows(entry) {
   const cpSection = document.getElementById("shadow-constraint-section");
 
   // Source entry resolution: if the current cell has no shadow data, fall
-  // back to the 2T sibling so the tab always shows something useful.
+  // back to its anchor-context sibling so the tab still shows a useful reference.
   let source = entry;
   let isFallback = false;
   const lacksSP = !source || !source.shadow_prices || !source.shadow_prices.length;

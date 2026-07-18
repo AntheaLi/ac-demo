@@ -370,7 +370,7 @@ canvas { width: 100%; max-height: 350px; }
 
 <div id="coverage-banner" style="max-width:1280px;margin:0 auto 12px;padding:10px 16px;border:1px solid var(--border);border-radius:8px;background:rgba(124,110,240,0.08);color:var(--text2);font-size:12px;line-height:1.5">
   <strong style="color:var(--accent2)">Search coverage.</strong>
-  All rows below use <strong>20T training tokens</strong> (Chinchilla-scale run).
+  Training-token budget: <strong id="coverage-tokens">20T</strong> (Chinchilla-scale run).
   <strong>NVIDIA H100</strong> is searched at high fidelity across the full variant matrix
   (dense &middot; MoE &middot; hybrid state families &middot; MoE hybrid, all 6 contexts &middot; 8 param targets).
   <strong>B200, TPU v5p, Trainium 2/3</strong> are searched coarsely — dense &amp; MoE only, no hybrid state families — as a comparison baseline; use H100 rows for detailed picks.
@@ -384,6 +384,14 @@ canvas { width: 100%; max-height: 350px; }
   document.addEventListener("DOMContentLoaded", function () {
     try {
       var p = (window.DATA && window.DATA._regen20t) || null;
+      var tokenValues = Array.from(new Set(((window.DATA && window.DATA.grid) || [])
+        .map(function (row) { return Number(row.tokens_T); })
+        .filter(function (value) { return Number.isFinite(value) && value > 0; })))
+        .sort(function (a, b) { return a - b; });
+      var tokenEl = document.getElementById("coverage-tokens");
+      if (tokenEl && tokenValues.length) {
+        tokenEl.textContent = tokenValues.map(function (value) { return value + "T"; }).join(", ");
+      }
       if (!p) return;
       var fid = p.search_fidelity_by_hw || {};
       var parts = Object.keys(fid).map(function (hw) {
@@ -393,7 +401,7 @@ canvas { width: 100%; max-height: 350px; }
       });
       var el = document.getElementById("coverage-meta");
       if (el) el.textContent = "Generated " + p.generated +
-        " &middot; search fidelity: " + parts.join(" | ");
+        " · search fidelity: " + parts.join(" | ");
     } catch (e) { /* banner is optional */ }
   });
 </script>
@@ -411,7 +419,9 @@ canvas { width: 100%; max-height: 350px; }
     </div>
     <div class="ctrl-group">
       <label>Training Tokens</label>
-      <select id="sel-tokens"></select>
+      <select id="sel-tokens">
+        <option value="20" selected>20T tokens</option>
+      </select>
     </div>
     <div class="ctrl-group">
       <label>Serving Constraint <span style="font-weight: 400; color: var(--text2); text-transform: none; letter-spacing: 0;">(legacy)</span></label>
@@ -941,4 +951,4 @@ canvas { width: 100%; max-height: 350px; }
 <script src="compiler-data-003.js"></script>
 <script src="compiler-data-004.js"></script>
 <script src="data-loader.js"></script>
-<script src="app.js?v=wave47-compact"></script>
+<script src="app.js?v=wave48-training-tokens"></script>
