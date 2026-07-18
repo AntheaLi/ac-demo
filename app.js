@@ -8,11 +8,43 @@ const HW_INFO = (() => {
   // via `CTX_SWEEP=1 python v1-ac-solver/generate_web_data.py` populates
   // grid data for them; this fallback is for label/picker rendering.
   const info = Object.assign({}, DATA.hardware_info || {});
-  if (!info.trainium2) info.trainium2 = { label: "AWS Trainium 2", hbm_gb: 96,  bf16_tflops: 650  };
-  if (!info.trainium3) info.trainium3 = { label: "AWS Trainium 3", hbm_gb: 192, bf16_tflops: 1300 };
+  if (!info.trainium2) info.trainium2 = { label: "AWS Trainium 2", hbm_gb: 96,  peak_bf16_tflops: 1300, effective_baseline_bf16_tflops: 650  };
+  if (!info.trainium3) info.trainium3 = { label: "AWS Trainium 3", hbm_gb: 192, peak_bf16_tflops: 2600, effective_baseline_bf16_tflops: 1300 };
   return info;
 })();
 const GRID = DATA.grid;
+
+const SERVING_MODE_LABELS = {
+  continuous: "Continuous serving cost",
+  unconstrained: "No serving constraints",
+  serving_50ms: "TBT ≤ 50ms, TTFT ≤ 500ms",
+  serving_20ms: "TBT ≤ 20ms, TTFT ≤ 200ms",
+};
+const AVAILABLE_SERVING_MODES = Array.from(
+  new Set((GRID || []).map(g => g.serving || "continuous"))
+);
+const DEFAULT_SERVING_MODE =
+  AVAILABLE_SERVING_MODES.includes("continuous") ? "continuous"
+  : AVAILABLE_SERVING_MODES.includes("unconstrained") ? "unconstrained"
+  : (AVAILABLE_SERVING_MODES[0] || "continuous");
+
+function hwPeakBf16(info) {
+  return info.peak_bf16_tflops ?? info.bf16_tflops ?? info.peak_bf16_tf
+    ?? info.effective_baseline_bf16_tflops;
+}
+
+function hwEffectiveBf16(info) {
+  return info.effective_baseline_bf16_tflops ?? info.bf16_tflops
+    ?? info.peak_bf16_tf ?? info.peak_bf16_tflops;
+}
+
+function hwSubline(info) {
+  const peak = hwPeakBf16(info);
+  const eff = hwEffectiveBf16(info);
+  const peakPart = peak ? `${peak} TFLOP/s BF16 peak` : "BF16 peak n/a";
+  const effPart = eff && peak && eff !== peak ? ` · ${eff} effective` : "";
+  return `${info.hbm_gb}GB HBM · ${peakPart}${effPart}`;
+}
 
 const PARAM_TARGETS = [
   { value: 1, label: "1B" },
@@ -82,7 +114,7 @@ const REFERENCE_MODELS = {
 };
 
 let state = {
-  hw: "h100", params: 7.0, tokens: 2.0, serving: "unconstrained",
+  hw: "h100", params: 7.0, tokens: 20.0, serving: DEFAULT_SERVING_MODE,
   ffnTypes: new Set(["dense", "moe"]),       // dense = standard FFN, moe = MoE expert FFN
   layerTypes: new Set(["attention", "hybrid"]), // attention = all-attention, hybrid = attention+state
   // v1-fix UI (a): serving context length axis. Defaults to 8192 for
@@ -90,21 +122,21 @@ let state = {
   // when the multi-context data is regenerated: 32k / 128k / 1M / 2M / 4M.
   contextLength: 8192,
   // v1-fix UI (a): Pareto-axis preference. Each weight is a non-negative
-  // float; defaults reproduce the legacy loss-only ordering. Presets are
-  // applied by `applyPreferencePreset(name)`.
+  // float over quality, serving latency, training throughput, memory, and
+  // parameter cost. Presets are applied by `applyPreferencePreset(name)`.
   prefPreset: "balanced",
-  prefWeights: { loss: 0.3, tbt: 0.25, tps: 0.15, mem: 0.15, params: 0.15 },
+  prefWeights: { loss: 0.30, tbt: 0.15, ttft: 0.10, tps: 0.15, mem: 0.15, params: 0.15 },
 };
 
 // Preference presets. Each one is an actual objective weighting used by
 // mergedEntry() and the Pareto tab, not just a label.
 const PREF_PRESETS = {
-  balanced:       { label: "Balanced",       loss: 0.30, tbt: 0.25, tps: 0.15, mem: 0.15, params: 0.15 },
-  quality:        { label: "Quality-first",  loss: 0.70, tbt: 0.05, tps: 0.15, mem: 0.05, params: 0.05 },
-  latency:        { label: "Latency-first",  loss: 0.15, tbt: 0.55, tps: 0.10, mem: 0.10, params: 0.10 },
-  serving_cost:   { label: "Serving cost",   loss: 0.15, tbt: 0.25, tps: 0.05, mem: 0.30, params: 0.25 },
-  training_cost:  { label: "Training cost",  loss: 0.20, tbt: 0.10, tps: 0.45, mem: 0.10, params: 0.15 },
-  custom:         { label: "Custom",         loss: 0.30, tbt: 0.25, tps: 0.15, mem: 0.15, params: 0.15 },
+  balanced:       { label: "Balanced",       loss: 0.30, tbt: 0.15, ttft: 0.10, tps: 0.15, mem: 0.15, params: 0.15 },
+  quality:        { label: "Quality-first",  loss: 0.70, tbt: 0.03, ttft: 0.02, tps: 0.15, mem: 0.05, params: 0.05 },
+  latency:        { label: "Latency-first",  loss: 0.15, tbt: 0.30, ttft: 0.25, tps: 0.10, mem: 0.10, params: 0.10 },
+  serving_cost:   { label: "Serving cost",   loss: 0.15, tbt: 0.15, ttft: 0.10, tps: 0.05, mem: 0.30, params: 0.25 },
+  training_cost:  { label: "Training cost",  loss: 0.20, tbt: 0.05, ttft: 0.05, tps: 0.45, mem: 0.10, params: 0.15 },
+  custom:         { label: "Custom",         loss: 0.30, tbt: 0.15, ttft: 0.10, tps: 0.15, mem: 0.15, params: 0.15 },
 };
 
 // v1-fix UI (a): context-length options. The grid generator emits these
@@ -121,15 +153,15 @@ const CTX_OPTIONS = [
 // Map UI weight keys to candidate object fields. Parameter cost uses total
 // params when present so MoE is not scored as if active params were storage
 // or serving footprint.
-const PREF_AXIS_FIELD = { loss: "loss", tbt: "tbt_ms", tps: "train_tps", mem: "mem_gb", params: "param_cost_B" };
+const PREF_AXIS_FIELD = { loss: "loss", tbt: "tbt_ms", ttft: "ttft_ms", tps: "train_tps", mem: "serving_footprint_gb", params: "param_cost_B" };
 // Direction: +1 for "lower is better", -1 for "higher is better" (only tps).
-const PREF_AXIS_DIR   = { loss: +1,     tbt: +1,        tps: -1,           mem: +1,        params: +1 };
+const PREF_AXIS_DIR   = { loss: +1,     tbt: +1,        ttft: +1,        tps: -1,           mem: +1,        params: +1 };
 
 function applyPreferencePreset(name) {
   const p = PREF_PRESETS[name];
   if (!p) return;
   state.prefPreset = name;
-  state.prefWeights = { loss: p.loss, tbt: p.tbt, tps: p.tps, mem: p.mem, params: p.params };
+  state.prefWeights = { loss: p.loss, tbt: p.tbt, ttft: p.ttft, tps: p.tps, mem: p.mem, params: p.params };
 }
 
 function paramCostB(c) {
@@ -139,7 +171,18 @@ function paramCostB(c) {
 function candidateMetric(c, field) {
   if (!c) return null;
   if (field === "param_cost_B") return paramCostB(c);
+  if (field === "train_tps") return trainTpsPerGpu(c);
+  if (field === "serving_footprint_gb") {
+    const memPerGpu = c.mem_gb;
+    const servingGpus = c.serving_instance_gpus ?? 1;
+    return memPerGpu == null ? null : memPerGpu * servingGpus;
+  }
   return c[field];
+}
+
+function trainTpsPerGpu(c) {
+  if (!c) return null;
+  return c.train_tps_per_gpu ?? c.train_tps ?? null;
 }
 
 // v1-fix UI (a): score a candidate against the per-axis best on the
@@ -233,7 +276,7 @@ Object.entries(HW_INFO).forEach(([key, info]) => {
   const d = document.createElement("div");
   d.className = "hw-card" + (key === state.hw ? " active" : "");
   d.dataset.hw = key;
-  d.innerHTML = `<div class="hw-name">${info.label}</div><div class="hw-sub">${info.hbm_gb}GB HBM · ${info.bf16_tflops} TFLOPS BF16</div>`;
+  d.innerHTML = `<div class="hw-name">${info.label}</div><div class="hw-sub">${hwSubline(info)}</div>`;
   d.onclick = () => { state.hw = key; updateAll(); };
   hwContainer.appendChild(d);
 });
@@ -250,7 +293,12 @@ PARAM_TARGETS.forEach(target => {
 });
 
 const tokenSel = document.getElementById("sel-tokens");
-[0.5, 2, 10].forEach(t => {
+// Wave 44: the grid is regenerated at a single Chinchilla-scale token
+// count (20T). Drive the selector from the payload so it can never
+// advertise token counts the data doesn't have.
+const TOKEN_OPTIONS = [...new Set((DATA.grid || []).map(g => g.tokens_T))]
+  .filter(t => t > 0).sort((a, b) => a - b);
+(TOKEN_OPTIONS.length ? TOKEN_OPTIONS : [20]).forEach(t => {
   const o = document.createElement("option");
   o.value = t; o.textContent = t + "T tokens";
   tokenSel.appendChild(o);
@@ -259,15 +307,15 @@ tokenSel.value = state.tokens;
 tokenSel.onchange = () => { state.tokens = parseFloat(tokenSel.value); updateAll(); };
 
 const servingSel = document.getElementById("sel-serving");
-[
-  { v: "unconstrained", l: "No serving constraints" },
-  { v: "serving_50ms", l: "TBT ≤ 50ms, TTFT ≤ 500ms" },
-  { v: "serving_20ms", l: "TBT ≤ 20ms, TTFT ≤ 200ms" },
-].forEach(s => {
+const servingOptions = AVAILABLE_SERVING_MODES.length
+  ? AVAILABLE_SERVING_MODES
+  : ["continuous"];
+servingOptions.forEach(mode => {
   const o = document.createElement("option");
-  o.value = s.v; o.textContent = s.l;
+  o.value = mode; o.textContent = SERVING_MODE_LABELS[mode] || mode;
   servingSel.appendChild(o);
 });
+servingSel.value = state.serving;
 servingSel.onchange = () => { state.serving = servingSel.value; updateAll(); };
 
 // FFN type toggles (multi-select)
@@ -348,7 +396,7 @@ function stateFamilyLabel(st) {
   if (!presetsEl || !slidersEl) return;
 
   presetsEl.innerHTML = "";
-  const ORDER = ["balanced", "custom"]; // removed: quality, latency, serving_cost, training_cost (user request)
+  const ORDER = ["balanced", "quality", "latency", "serving_cost", "training_cost", "custom"];
   ORDER.forEach(name => {
     const p = PREF_PRESETS[name];
     const d = document.createElement("div");
@@ -366,7 +414,7 @@ function stateFamilyLabel(st) {
     presetsEl.appendChild(d);
   });
 
-  const keys = ["loss", "tbt", "tps", "mem", "params"];
+  const keys = ["loss", "tbt", "ttft", "tps", "mem", "params"];
   function syncSlidersToWeights() {
     keys.forEach(k => {
       const slider = document.getElementById("pref-" + k);
@@ -1111,6 +1159,11 @@ function candidateForEntry(c, entry) {
   out.model_type = out.model_type || fam;
   out.context_length = out.context_length || entry.context_length || 8192;
   out.param_cost_B = paramCostB(out);
+  // New payloads carry explicit per-replica, per-GPU, and aggregate rates.
+  // Normalize the legacy scoring field so every browser comparison is
+  // apples-to-apples even when candidates use different TP/PP/CP shapes.
+  out.train_tps = trainTpsPerGpu(out);
+  out.train_tps_unit = "tokens/sec/GPU";
   if (isProjectedEntry(entry)) {
     out._projection_labels = entryLabels(entry);
   }
@@ -1173,6 +1226,68 @@ function lookup(hw, params, tokens, serving, ctx) {
   return GRID.find(g => g.hw === hw && g.params_B === params && g.tokens_T === tokens && g.serving === serving && _ctxMatches(g, ctx)) || null;
 }
 
+// =============================================================================
+// Wave 2c Step 2c.1 — per-family rollup for the loss-vs-serving comparison.
+// =============================================================================
+//
+// Returns up to 4 entries sorted by ascending loss, one per (arch_mode,
+// state_type) family. Each entry has loss / tbt_ms / ttft_ms / mem_gb /
+// train_tps + deltas vs the family-wide minimum.
+//
+// Schema-v2 path: prefer the precomputed `cell.families` field once Wave 2a
+// + Wave 3 land. Fallback path: derive client-side from existing grid rows
+// under the payload's default serving mode.
+function getFamilies(hw, params, tokens, ctx) {
+  ctx = ctx || state.contextLength || 8192;
+  // Schema-v2 path: any matching cell with a precomputed families list wins.
+  const v2cell = GRID.find(g => g.hw === hw && g.params_B === params
+    && g.tokens_T === tokens && _ctxMatches(g, ctx)
+    && Array.isArray(g.families) && g.families.length);
+  if (v2cell) return v2cell.families;
+
+  // Fallback: roll up from existing per-arch-mode rows under the default serving mode.
+  // Key by arch_mode only (not arch_mode + state_type) — the 4 families the
+  // user wants to see are dense, hybrid, MoE, MoE-hybrid. Within hybrid /
+  // MoE-hybrid we pick the best state_type by loss; its name is shown as a
+  // tag so the user sees which state_type won.
+  const rows = GRID.filter(g => g.hw === hw && g.params_B === params
+    && g.tokens_T === tokens && g.serving === DEFAULT_SERVING_MODE
+    && _ctxMatches(g, ctx) && g.optimal);
+  if (!rows.length) return [];
+  const byKey = new Map();
+  for (const r of rows) {
+    const key = r.arch_mode || "dense";
+    const prev = byKey.get(key);
+    if (!prev || r.optimal.loss < prev.optimal.loss) byKey.set(key, r);
+  }
+  const fams = [...byKey.values()].map(r => ({
+    arch_mode: r.arch_mode || "dense",
+    state_type: r.state_type || null,
+    loss: r.optimal.loss,
+    tbt_ms: r.optimal.tbt_ms,
+    ttft_ms: r.optimal.ttft_ms,
+    mem_gb: r.optimal.mem_gb,
+    train_tps: r.optimal.train_tps,
+    hbm_spill_gb: 0.0,        // pre-Wave-2a: no spill modeled, assume fits
+    spill_tier: "fits",
+    d_model: r.optimal.d_model,
+    n_layers: r.optimal.n_layers,
+    kv_bits: r.optimal.kv_bits,
+    hw: r.hw,
+    tp: r.tp, pp: r.pp, dp: r.dp,
+  })).sort((a, b) => a.loss - b.loss);
+  if (fams.length) {
+    const minLoss = fams[0].loss || 1;
+    const minTbt = fams[0].tbt_ms || 1;
+    for (const f of fams) {
+      f.loss_delta_pct = 100 * (f.loss - minLoss) / Math.abs(minLoss);
+      f.tbt_delta_pct  = 100 * (f.tbt_ms - minTbt) / Math.abs(minTbt);
+    }
+  }
+  return fams;
+}
+window.getFamilies = getFamilies;  // expose for console smoke-tests
+
 function lookupFiltered(hw, params, tokens, serving, families, ctx) {
   ctx = ctx || state.contextLength || 8192;
   // Round-2 fix N4: strict context match only. No silent fallback to a
@@ -1192,7 +1307,23 @@ function mergedEntry(hw, params, tokens, serving, families, ctx) {
   // uses only embedded records, not copied backend candidate counts.
   const records = [];
   entries.forEach(e => records.push(...displayedRecordsForEntry(e)));
-  if (!records.length) return entries[0];
+  if (!records.length) {
+    const reasons = Array.from(new Set(
+      entries.flatMap(e => e.infeasible_reasons || [])
+    ));
+    return {
+      ...entries[0],
+      optimal: null,
+      pareto: [],
+      pareto_size: 0,
+      candidates: entries.reduce((sum, e) => sum + (e.candidates || 0), 0),
+      feasible: 0,
+      time_s: Math.max(...entries.map(e => e.time_s || 0)),
+      infeasible_reasons: reasons.length ? reasons : [
+        "All displayed candidates exceed per-device HBM or serving limits",
+      ],
+    };
+  }
   const pareto = displayedFrontier(records);
   const scoringPool = pareto.length ? pareto : records;
   const bests = frontierBests(scoringPool);
@@ -1516,7 +1647,7 @@ function drawGroupedBars(canvasId, groups, opts = {}) {
 }
 
 const METRICS = {
-  train_tps: { label: "Training TPS", better: "high", fmt: v => fmtN(Math.round(v)) },
+  train_tps: { label: "Training TPS/GPU", better: "high", fmt: v => fmtN(Math.round(v)) },
   loss: { label: "Loss Proxy", better: "low", fmt: v => v.toFixed(4) },
   compat_score: { label: "Hardware Fit Score", better: "high", fmt: v => v.toFixed(0) },
   tbt_ms: { label: "Serving TBT", better: "low", fmt: v => `${v.toFixed(2)}ms` },
@@ -1957,30 +2088,40 @@ function updateAll() {
   const meta = paramMeta(state.params);
 
   // Config summary
-  const tp = entry ? entry.tp : "?";
-  const dp = entry ? entry.dp : "?";
-  const pp = entry ? entry.pp : "?";
+  const topology = entry && entry.optimal ? entry.optimal : null;
+  const tp = topology ? (topology.tp ?? 1) : "?";
+  const pp = topology ? (topology.pp ?? 1) : "?";
+  const cp = topology ? (topology.cp ?? topology.cp_degree ?? 1) : "?";
+  const dp = topology ? (topology.dp ?? 1) : "?";
+  const ep = topology ? (topology.ep ?? 1) : "?";
   const labels = entryLabels(entry);
   const provenanceText = entry
     ? (isProjectedEntry(entry)
       ? `Projection: ${labels.length ? labels.join(" + ") : "derived row"}`
       : "Search: native optimizer lattice")
     : "Search: no matching row";
-    // Round-2 fix: surface the per-replica node count so users see when
-  // TP=16/32/64 requires multi-node serving (cross-IB tensor parallel).
-  const nodesPerReplica = entry ? (entry.nodes_per_replica || Math.max(1, Math.ceil(tp / 8))) : 1;
-  const trainingNodes = (entry && entry.training_nodes) || 8;
-  const trainingGpus = (entry && entry.training_cluster_gpus) || 64;
+  const replicaGpus = topology
+    ? (topology.training_replica_gpus || tp * pp * cp) : 1;
+  const servingGpus = topology
+    ? (topology.serving_instance_gpus || replicaGpus * ep) : 1;
+  const nodesPerReplica = Math.max(1, Math.ceil(replicaGpus / 8));
+  const trainingGpus = topology
+    ? (topology.training_cluster_gpus || replicaGpus * dp) : 64;
+  const trainingNodes = Math.max(1, Math.ceil(trainingGpus / 8));
   const nodeNote = nodesPerReplica === 1
-    ? `1 node / replica (TP=${tp} within NVLink)`
-    : `${nodesPerReplica} nodes / replica (TP=${tp} spans NVLink islands; cross-IB)`;
+    ? `${replicaGpus} GPUs / training replica (within one node)`
+    : `${replicaGpus} GPUs / training replica (${nodesPerReplica} nodes)`;
+  const topologySummary = topology
+    ? `TP=${tp} · PP=${pp} · CP=${cp} · DP=${dp} · EP=${ep}<br>${nodeNote}<br>Serving instance: ${servingGpus} GPUs<br>Training cluster: ${trainingGpus} GPUs / ${trainingNodes} nodes`
+    : `No feasible parallelism topology<br>Training cluster target: ${entry ? (entry.training_cluster_gpus || 64) : "?"} GPUs`;
   document.getElementById("config-summary").innerHTML =
-    `TP=${tp} · PP=${pp} · DP=${dp}<br>${nodeNote}<br>Training: ${trainingGpus} GPUs / ${trainingNodes} nodes<br>Context: ${ctxLabel(state.contextLength)}<br>Vocab: 32,000<br>` +
+    `${topologySummary}<br>Context: ${ctxLabel(state.contextLength)}<br>Vocab: 32,000<br>` +
     provenanceText +
     `${meta.note ? `<br>${meta.note}` : ""}` +
     `${REFERENCE_MODELS[state.params] ? `<br>Ref: ${REFERENCE_MODELS[state.params].map(r => r.name).join(", ")}` : ""}`;
 
   renderOverview(entry);
+  renderFamilyCard();           // Wave 2c Step 2c.3
   renderPareto(entry);
   renderModifier();
   renderDeltaInfluence();
@@ -1989,9 +2130,150 @@ function updateAll() {
   renderCompare();
 }
 
+// =============================================================================
+// Wave 2c Step 2c.2 — family-comparison table renderer.
+// =============================================================================
+//
+// Shows one row per arch family (dense, hybrid, MoE, MoE-hybrid) for the
+// currently-selected (hw, params, ctx) cell, with loss / TBT / TTFT / mem,
+// and a "vs best" delta column. Replaces the categorical serving filter
+// with continuous serving-cost reporting.
+function prettyArchName(mode, state) {
+  const m = ({
+    dense: "Dense",
+    hybrid: "Hybrid",
+    moe: "MoE",
+    moe_hybrid: "MoE-hybrid",
+  })[mode] || mode;
+  if (!state) return m;
+  // Match the existing stateFamilyLabel() naming where possible
+  const s = String(state).toLowerCase();
+  const stateName = ({
+    mamba2: "Mamba-2",
+    gated_delta: "Gated Δ",
+    kda: "KDA",
+    gla: "GLA",
+    sliding_window: "SWA",
+  })[s] || state;
+  return `${m} <span class="state-tag">(${stateName})</span>`;
+}
+
+function fmtTbtDelta(pct) {
+  if (!Number.isFinite(pct) || Math.abs(pct) < 0.5) return "—";
+  // For very large differences, prefer "Nx faster/slower" over "%"
+  if (Math.abs(pct) >= 100) {
+    if (pct > 0) {
+      const factor = 1 + pct / 100;
+      return `${factor.toFixed(1)}× slower decode`;
+    } else {
+      const factor = 1 / (1 + pct / 100);
+      return `${factor.toFixed(1)}× faster decode`;
+    }
+  }
+  return `${pct > 0 ? "+" : ""}${pct.toFixed(0)}% ${pct > 0 ? "slower" : "faster"} decode`;
+}
+
+function renderFamilyCard() {
+  const card = document.getElementById("family-card");
+  if (!card) return;
+  const fams = getFamilies(state.hw, state.params, state.tokens, state.contextLength);
+  const ctxL = ctxLabel(state.contextLength);
+  const paramsL = fmtParamTarget(state.params);
+  const hwL = (HW_INFO[state.hw] && HW_INFO[state.hw].label) || state.hw;
+
+  card.classList.add("family-card");
+  if (!fams || !fams.length) {
+    card.innerHTML = `<h3>Architecture-family comparison · ${paramsL} @ ${ctxL} on ${hwL}</h3>` +
+      `<div class="family-empty">No feasible families at this (hw, params, ctx). ` +
+      `Try a smaller context, more memory-rich hardware, or a different token budget.</div>`;
+    return;
+  }
+
+  // Build rows
+  const minLoss = fams[0].loss;
+  const minTbt  = fams[0].tbt_ms;
+  const rowsHtml = fams.map((f, i) => {
+    const isBest = i === 0;
+    const isSpill = f.spill_tier && f.spill_tier !== "fits";
+    const cls = [isBest ? "best" : "", isSpill ? "spilled" : ""].filter(Boolean).join(" ");
+    const archCell = `<span class="arch-label">${prettyArchName(f.arch_mode, f.state_type)}</span>`;
+    const loss = f.loss != null ? f.loss.toFixed(4) : "—";
+    const tbt  = Number.isFinite(f.tbt_ms)  ? `${f.tbt_ms.toFixed(0)} ms` : "—";
+    const ttft = Number.isFinite(f.ttft_ms) ? `${f.ttft_ms.toFixed(0)} ms` : "—";
+    const mem  = Number.isFinite(f.mem_gb)  ? `${f.mem_gb.toFixed(0)} GB` : "—";
+    let deltaHtml = "—";
+    let deltaCls = "delta";
+    if (!isBest) {
+      const loss_pct = f.loss_delta_pct != null ? f.loss_delta_pct : 0;
+      const tbt_pct  = f.tbt_delta_pct  != null ? f.tbt_delta_pct  : 0;
+      const lossStr = `+${loss_pct.toFixed(1)}% loss`;
+      const tbtStr  = fmtTbtDelta(tbt_pct);
+      deltaHtml = `${lossStr}, ${tbtStr}`;
+      // Color: green if loss is small but TBT is much better; orange if both worse.
+      if (tbt_pct < 0 && loss_pct < 3) deltaCls += " good";
+      else if (tbt_pct > 50) deltaCls += " bad";
+    }
+    return `<tr class="${cls}">
+      <td>${archCell}</td>
+      <td class="num">${loss}</td>
+      <td class="num">${tbt}</td>
+      <td class="num">${ttft}</td>
+      <td class="num">${mem}</td>
+      <td class="${deltaCls}">${deltaHtml}</td>
+    </tr>`;
+  }).join("");
+
+  const hasSpill = fams.some(f => f.spill_tier && f.spill_tier !== "fits");
+  const note = hasSpill
+    ? `<div class="sub">Orange rows exceed per-GPU HBM and serve via NVLink / PCIe spill.</div>`
+    : `<div class="sub">Loss-minimum architecture per family. Serving cost is continuous — pick by the trade-off you care about.</div>`;
+
+  card.innerHTML =
+    `<h3>Architecture-family comparison · ${paramsL} @ ${ctxL} on ${hwL}</h3>` +
+    note +
+    `<table class="family-table">
+       <thead>
+         <tr>
+           <th>Arch family</th>
+           <th class="num">Loss</th>
+           <th class="num">TBT</th>
+           <th class="num">TTFT</th>
+           <th class="num">Mem</th>
+           <th>vs best</th>
+         </tr>
+       </thead>
+       <tbody>${rowsHtml}</tbody>
+     </table>`;
+}
+
 // ======================
 // Tab: Overview
 // ======================
+function attentionLabel(o) {
+  if (!o) return "Attention";
+  const named = {
+    mla: "MLA", nsa: "NSA", csa: "CSA",
+    indexshare: "IndexShare", msa: "MSA",
+  }[o.attention_type];
+  if (named || o._mla) return named || "MLA";
+  if (!o.n_heads || !o.n_kv_heads) return "Attention";
+  return o.n_heads === o.n_kv_heads ? "MHA" : o.n_kv_heads === 1 ? "MQA" : `GQA-${o.n_heads/o.n_kv_heads}`;
+}
+
+function kvHeadLabel(o) {
+  if (!o) return "";
+  if (o.attention_type === "mla" || o._mla) return `${o.n_kv_heads} (MLA latent KV)`;
+  if (o.attention_type === "nsa") return `${o.n_kv_heads} (NSA sparse KV)`;
+  if (["csa", "indexshare", "msa"].includes(o.attention_type)) {
+    return `${o.n_kv_heads} (${attentionLabel(o)} compressed KV)`;
+  }
+  return `${o.n_kv_heads} (${attentionLabel(o)})`;
+}
+
+function isMLA(o) {
+  return !!(o && (o.attention_type === "mla" || o._mla));
+}
+
 function renderOverview(entry) {
   const statsBar = document.getElementById("stats-bar");
   const optCard = document.getElementById("optimal-card");
@@ -2010,7 +2292,7 @@ function renderOverview(entry) {
   }
 
   const o = entry.optimal;
-  const gqa = o.n_heads === o.n_kv_heads ? "MHA" : o.n_kv_heads === 1 ? "MQA" : `GQA-${o.n_heads/o.n_kv_heads}`;
+  const gqa = attentionLabel(o);
   const projected = isProjectedEntry(entry);
   const labels = entryLabels(entry);
   const statCandidateLabel = projected ? "Embedded Pts" : "Candidates";
@@ -2036,7 +2318,7 @@ function renderOverview(entry) {
     <div class="metric"><span class="label">n_layers</span><span class="val">${o.n_layers}</span></div>
     <div class="metric"><span class="label">n_heads</span><span class="val">${o.n_heads}</span></div>
     <div class="metric"><span class="label">d_head</span><span class="val">${o.d_head}</span></div>
-    <div class="metric"><span class="label">n_kv_heads</span><span class="val">${o.n_kv_heads} (${gqa})</span></div>
+    <div class="metric"><span class="label">n_kv_heads</span><span class="val">${kvHeadLabel(o)}</span></div>
     <div class="metric"><span class="label">ffn_dim</span><span class="val">${fmtN(o.ffn_dim)}</span></div>
     <div class="metric"><span class="label">vocab_size</span><span class="val">32,000</span></div>
     <div class="metric"><span class="label">Active Params</span><span class="val">${fmtParamCount(o.active_params_B || o.params_B)}</span></div>
@@ -2049,7 +2331,8 @@ function renderOverview(entry) {
     ? ("MoE + Hybrid ("+stateFamilyLabel(o.state_type)+")")
     : ("Hybrid (Attn + "+stateFamilyLabel(o.state_type)+")"))
   : ({dense:"Dense Transformer",moe:"MoE (Sparse Experts)"}[o.arch_family||"dense"]||o.arch_family))
- + (o.attention_type==="mla" ? " · MLA" : ""))}</span></div>`;
+ + (!["full", "gqa", "mha", undefined, null].includes(o.attention_type)
+    ? " · " + attentionLabel(o) : ""))}</span></div>`;
   // MoE info
   if (o.n_experts && o.n_experts > 1) {
     optCard.innerHTML += `
@@ -2084,6 +2367,24 @@ function renderOverview(entry) {
     <div class="metric"><span class="label">Selected blocks</span><span class="val">top-${o.nsa_select_top_k ?? "?"} of size ${o.nsa_select_block_size ?? "?"}</span></div>
     <div class="metric"><span class="label">Sliding window</span><span class="val">${o.nsa_window_size ?? "?"}</span></div>
     <div class="metric"><span class="label">Branches</span><span class="val">compressed + selected + window</span></div>`;
+  }
+
+  if (["csa", "indexshare", "msa"].includes(o.attention_type)) {
+    const sparseRows = o.attention_type === "csa"
+      ? `<div class="metric"><span class="label">Block size</span><span class="val">${o.csa_block_size ?? "?"}</span></div>
+         <div class="metric"><span class="label">Selected blocks</span><span class="val">top-${o.csa_top_k_blocks ?? "?"}</span></div>
+         <div class="metric"><span class="label">Compression dim</span><span class="val">${o.csa_compression_dim ?? "?"}</span></div>`
+      : o.attention_type === "indexshare"
+        ? `<div class="metric"><span class="label">Index buckets</span><span class="val">${o.indexshare_num_buckets ?? "?"}</span></div>
+           <div class="metric"><span class="label">Selected buckets</span><span class="val">top-${o.indexshare_top_k_buckets ?? "?"}</span></div>
+           <div class="metric"><span class="label">Index dim</span><span class="val">${o.indexshare_index_dim ?? "?"}</span></div>`
+        : `<div class="metric"><span class="label">Local window</span><span class="val">${o.msa_window_size ?? "?"}</span></div>
+           <div class="metric"><span class="label">Dilated tokens</span><span class="val">top-${o.msa_dilated_top_k ?? "?"}</span></div>
+           <div class="metric"><span class="label">Global tokens</span><span class="val">top-${o.msa_global_top_k ?? "?"}</span></div>`;
+    optCard.innerHTML += `
+    <hr style="border:none;border-top:1px solid var(--border);margin:8px 0">
+    <div style="font-size:12px;font-weight:700;color:#22d3ee;margin-bottom:4px;">${attentionLabel(o)} Compressed Attention</div>
+    ${sparseRows}`;
   }
 
   // v1-fix YOCO: cross-layer KV-sharing sub-card.
@@ -2340,7 +2641,7 @@ function renderOverview(entry) {
   // Performance card — null-safe: fallback to "n/a" if fields missing
   const _tbt = o.tbt_ms ?? null;
   const _ttft = o.ttft_ms ?? null;
-  const _tps = o.train_tps ?? null;
+  const _tps = trainTpsPerGpu(o);
   const _mem = o.mem_gb ?? null;
   const tbtClass = _tbt == null ? "" : _tbt <= 20 ? "good" : _tbt <= 50 ? "warn" : "bad";
   const archFeatures = qualityFeatures(o, "architecture_residual");
@@ -2362,7 +2663,7 @@ function renderOverview(entry) {
     <div class="metric"><span class="label">Precision Residual</span><span class="val">${(o.precision_residual_pct ?? termValuePct(qualityTerm(o, "precision_residual"))).toFixed(2)}%</span></div>
     <div class="metric"><span class="label">Uncertainty</span><span class="val">${(o.uncertainty_total_pct ?? 0).toFixed(2)}%</span></div>
     <hr style="border:none;border-top:1px solid var(--border);margin:8px 0">
-    <div class="metric"><span class="label">Training TPS</span><span class="val">${_tps != null ? fmtN(_tps) : "n/a"}</span></div>
+    <div class="metric"><span class="label">Training TPS/GPU</span><span class="val">${_tps != null ? fmtN(_tps) : "n/a"}</span></div>
     <div class="metric"><span class="label">Serving TBT</span><span class="val ${tbtClass}">${_tbt != null ? _tbt + " ms" : "n/a"}</span></div>
     <div class="metric"><span class="label">Serving TTFT</span><span class="val">${_ttft != null ? _ttft + " ms" : "n/a"}</span></div>
     ${prefillAssumptions}
@@ -2372,6 +2673,15 @@ function renderOverview(entry) {
   const qDefault = archFeatures.n_query_heads_default;
   const qHeads = archFeatures.n_query_heads ?? o.n_heads;
   const gqaGroup = archFeatures.gqa_group_size ?? (o.n_heads / o.n_kv_heads);
+  const mla = isMLA(o);
+  const kvCardTitle = mla ? "MLA Latent KV" : "KV Heads";
+  const kvCardValue = mla ? `c_kv ${o.mla_kv_latent_dim ?? "?"}` : (archFeatures.n_kv_heads ?? o.n_kv_heads);
+  const kvCardText = mla
+    ? `Compressed cache with RoPE ${o.mla_rope_head_dim ?? "?"}; ${o.mla_kv_reduction_vs_mha ? o.mla_kv_reduction_vs_mha.toFixed(1) + "x" : "latent"} vs MHA.`
+    : `Hardware memory/latency lever; GQA group ${Number.isFinite(gqaGroup) ? gqaGroup.toFixed(2) : "n/a"}.`;
+  const kvBytesText = mla
+    ? "MLA latent-cache estimate, not 2 x n_kv_heads x d_head."
+    : "BF16 estimate: 2 × n_kv_heads × d_head × bytes.";
   let penHTML = `
     <h3>Compiler Quality Terms</h3>
     <p style="color:var(--text2);font-size:12px;line-height:1.5;margin-bottom:10px;">
@@ -2380,8 +2690,8 @@ function renderOverview(entry) {
     <div class="quality-term-grid">
       <div class="quality-term-card"><h4>Query Heads</h4><strong>${qHeads}</strong><span>Weak width-derived prior; default ${qDefault ?? "n/a"}.</span></div>
       <div class="quality-term-card"><h4>Head Dimension</h4><strong>${archFeatures.d_head ?? o.d_head}</strong><span>Weak U-shaped prior around 128.</span></div>
-      <div class="quality-term-card"><h4>KV Heads</h4><strong>${archFeatures.n_kv_heads ?? o.n_kv_heads}</strong><span>Hardware memory/latency lever; GQA group ${Number.isFinite(gqaGroup) ? gqaGroup.toFixed(2) : "n/a"}.</span></div>
-      <div class="quality-term-card"><h4>KV Bytes / Token / Layer</h4><strong>${formatBytes(kvBytes)}</strong><span>BF16 estimate: 2 × n_kv_heads × d_head × bytes.</span></div>
+      <div class="quality-term-card"><h4>${kvCardTitle}</h4><strong>${kvCardValue}</strong><span>${kvCardText}</span></div>
+      <div class="quality-term-card"><h4>KV Bytes / Token / Layer</h4><strong>${formatBytes(kvBytes)}</strong><span>${kvBytesText}</span></div>
     </div>
     ${qualityTermBars(o)}`;
   if (Object.keys(subterms).length) {
@@ -2432,14 +2742,21 @@ function renderArchitectureDiagram(o, kvBytes) {
   const ffnRatio = o.d_model ? (o.ffn_dim / o.d_model) : 0;
   const qDim = o.n_heads * o.d_head;
   const kvDim = o.n_kv_heads * o.d_head;
-  // v1-fix MLA/NSA: relabel the attention chip per family.
+  // Relabel and parameterize compressed-attention families.
   const isMLA = o.attention_type === "mla";
   const isNSA = o.attention_type === "nsa";
+  const sparseAttentionDetail = {
+    csa: `block ${o.csa_block_size ?? "?"}, top-${o.csa_top_k_blocks ?? "?"} blocks`,
+    indexshare: `${o.indexshare_num_buckets ?? "?"} buckets, top-${o.indexshare_top_k_buckets ?? "?"}`,
+    msa: `window ${o.msa_window_size ?? "?"}, dilated top-${o.msa_dilated_top_k ?? "?"}, global top-${o.msa_global_top_k ?? "?"}`,
+  }[o.attention_type] || null;
   const attnType = isMLA
     ? `MLA (c_kv=${o.mla_kv_latent_dim ?? "?"}, d_rope=${o.mla_rope_head_dim ?? "?"})`
     : isNSA
       ? `NSA (top-${o.nsa_select_top_k ?? "?"} blocks, win=${o.nsa_window_size ?? "?"})`
-      : (o.n_heads === o.n_kv_heads ? "MHA" : o.n_kv_heads === 1 ? "MQA" : `GQA-${gqaRatio.toFixed(gqaRatio % 1 ? 1 : 0)}`);
+      : sparseAttentionDetail
+        ? `${attentionLabel(o)} (${sparseAttentionDetail})`
+        : (o.n_heads === o.n_kv_heads ? "MHA" : o.n_kv_heads === 1 ? "MQA" : `GQA-${gqaRatio.toFixed(gqaRatio % 1 ? 1 : 0)}`);
   const optDims = (DATA.grid || []).map(e => e.optimal).filter(Boolean);
   const rangeOf = (key) => {
     const vals = optDims.map(x => Number(x[key])).filter(Number.isFinite);
@@ -2566,10 +2883,12 @@ function renderArchitectureDiagram(o, kvBytes) {
                   <div><span class="title">${attnType} Self-Attention</span><span class="sub">${
                     isMLA ? `token mixer: softmax(QK<sup>T</sup>/√d)·V on (c_kv↑K, c_kv↑V) · cache = ONE latent + d_rope key` :
                     isNSA ? `token mixer: 3 branches — compressed (block summaries) + selected (top-K blocks) + sliding window` :
+                    sparseAttentionDetail ? `token mixer: ${attentionLabel(o)} compressed attention · ${sparseAttentionDetail}` :
                             `token mixer: softmax(QK<sup>T</sup>/√d)·V · KV cache O(L)`
                   }</span><span class="sub">${
                     isMLA ? `Q-down ${fmtN(o.d_model)}→${fmtN(o.mla_q_latent_dim ?? 1536)}→${o.n_heads}×(${o.mla_rope_head_dim ?? 64}+${o.mla_nope_head_dim ?? 128}) · KV-cache (${o.mla_kv_latent_dim ?? 512}+${o.mla_rope_head_dim ?? 64})×${o.kv_bits}-bit = ${o.mla_kv_bytes_per_token_per_layer ?? "?"} B/tok/layer · ${o.mla_kv_reduction_vs_mha ? o.mla_kv_reduction_vs_mha.toFixed(0)+"x vs equiv. MHA" : "MLA"}` :
                     isNSA ? `compressed: ceil(L/${o.nsa_compress_block_stride ?? 16}) blocks · selected: top-${o.nsa_select_top_k ?? 16} × ${o.nsa_select_block_size ?? 64} tokens · window: ${o.nsa_window_size ?? 512} tokens · sub-linear KV` :
+                    sparseAttentionDetail ? `${sparseAttentionDetail} · compressed long-context attention` :
                             `Q ${o.n_heads}×${o.d_head}=${fmtN(qDim)} · KV ${o.n_kv_heads}×${o.d_head}=${fmtN(kvDim)} · cache ${o.kv_bits}-bit`
                   }</span></div>
                 </div>
@@ -2798,7 +3117,7 @@ function renderPareto(entry) {
   });
 
   const selected = records[paretoState.selected] || records[Math.max(optIdx, 0)] || records[0];
-  const gqa = selected.n_heads === selected.n_kv_heads ? "MHA" : selected.n_kv_heads === 1 ? "MQA" : `GQA-${selected.n_heads/selected.n_kv_heads}`;
+  const gqa = attentionLabel(selected);
   document.getElementById("pareto-detail").innerHTML = `
     <h3>${paretoState.manualSelection ? "Inspected Frontier Point" : "Objective-Selected Frontier Point"}</h3>
     ${selected._projection_labels ? `<p style="font-size:12px;color:#f59e0b;line-height:1.5;margin-bottom:8px;">Projection: ${selected._projection_labels.join(" + ")}</p>` : ""}
@@ -2810,7 +3129,7 @@ function renderPareto(entry) {
     <div class="metric"><span class="label">Family</span><span class="val">${(selected.arch_family || "dense").replace(/_/g," ")}</span></div>
     <hr style="border:none;border-top:1px solid var(--border);margin:8px 0">
     <div class="metric"><span class="label">Loss proxy</span><span class="val">${selected.loss}</span></div>
-    <div class="metric"><span class="label">Training TPS</span><span class="val">${fmtN(selected.train_tps)}</span></div>
+    <div class="metric"><span class="label">Training TPS/GPU</span><span class="val">${fmtN(selected.train_tps)}</span></div>
     <div class="metric"><span class="label">TBT</span><span class="val">${selected.tbt_ms} ms</span></div>
     <div class="metric"><span class="label">TTFT</span><span class="val">${selected.ttft_ms} ms</span></div>
     <div class="metric"><span class="label">Memory/GPU</span><span class="val">${selected.mem_gb} GB</span></div>
@@ -2820,7 +3139,7 @@ function renderPareto(entry) {
 
   // Table
   const thead = document.querySelector("#pareto-table thead tr");
-  thead.innerHTML = "<th>#</th><th>d_model</th><th>L</th><th>h</th><th>kv_h</th><th>ffn</th><th>Prec</th><th>KV</th><th>Param Cost</th><th>Loss</th><th>TPS</th><th>TBT</th><th>Mem</th><th>Family</th><th>Conf</th>";
+  thead.innerHTML = "<th>#</th><th>d_model</th><th>L</th><th>h</th><th>kv_h</th><th>ffn</th><th>Prec</th><th>KV</th><th>Param Cost</th><th>Loss</th><th>TPS/GPU</th><th>TBT</th><th>TTFT</th><th>Mem</th><th>Family</th><th>Conf</th>";
   const tbody = document.querySelector("#pareto-table tbody");
   tbody.innerHTML = "";
   records.forEach((p, i) => {
@@ -2829,7 +3148,7 @@ function renderPareto(entry) {
       <td>${i+1}</td><td>${p.d_model}</td><td>${p.n_layers}</td><td>${p.n_heads}</td>
       <td>${p.n_kv_heads}</td><td>${fmtN(p.ffn_dim)}</td><td>${p.ffn_prec}</td><td>${p.kv_bits}</td>
       <td>${fmtParamCount(paramCostB(p))}</td><td>${p.loss}</td><td>${fmtN(p.train_tps)}</td>
-      <td>${p.tbt_ms}ms</td><td>${p.mem_gb}GB</td><td>${(p.arch_family || "dense").replace(/_/g," ")}</td><td>${confBadge(p.confidence)}</td></tr>`;
+      <td>${p.tbt_ms}ms</td><td>${p.ttft_ms}ms</td><td>${p.mem_gb}GB</td><td>${(p.arch_family || "dense").replace(/_/g," ")}</td><td>${confBadge(p.confidence)}</td></tr>`;
   });
   tbody.querySelectorAll("tr").forEach(row => {
     row.onclick = () => {
@@ -2898,7 +3217,7 @@ function renderModifier() {
 }
 
 function modifierDetailHTML(rec, baseline, recommended) {
-  const gqa = rec.n_heads === rec.n_kv_heads ? "MHA" : rec.n_kv_heads === 1 ? "MQA" : `GQA-${rec.n_heads/rec.n_kv_heads}`;
+  const gqa = attentionLabel(rec);
   const selectedNote = rec === recommended ? `<span class="badge high">recommended</span>` : rec.isBaseline ? `<span class="badge medium">baseline</span>` : "";
   const riskClass = rec.riskLabel ? `risk-${rec.riskLabel}` : "";
   const qualityText = rec.qualityPreserving ? "same model" : `${rec.qualityRiskPct >= 0 ? "+" : ""}${rec.qualityRiskPct.toFixed(3)}% proxy`;
@@ -3303,7 +3622,7 @@ function renderDeltaInfluenceCard(baseline, selected, all, frontier) {
       <tbody>
         ${_diMetricRow("Quality penalty",  baseline.qualityRiskPct || 0,                 selected.qualityRiskPct || 0,                 "%",      true,  v => v.toFixed(3))}
         ${_diMetricRow("Serving TBT",      baseline.tbt_ms || 0,                          selected.tbt_ms || 0,                          "ms",     true,  v => v.toFixed(2))}
-        ${_diMetricRow("Training TPS",     baseline.training_tps || baseline.train_tps || 0, selected.training_tps || selected.train_tps || 0, "tok/s", false, v => v.toFixed(0))}
+        ${_diMetricRow("Training TPS/GPU", baseline.training_tps || baseline.train_tps || 0, selected.training_tps || selected.train_tps || 0, "tok/s", false, v => v.toFixed(0))}
         ${_diMetricRow("Memory / GPU",     baseline.mem_gb || 0,                          selected.mem_gb || 0,                          "GB",     true,  v => v.toFixed(2))}
         ${_diMetricRow("KV cache",         baseline.kv_gb || 0,                           selected.kv_gb || 0,                           "GB",     true,  v => v.toFixed(3))}
       </tbody>
@@ -3667,7 +3986,7 @@ function diInfluenceBodyHTML(baseline, selected, frontier, compact) {
       <tbody>
         ${_diMetricRow("Predicted loss",   baseline.loss || 0,                             selected.loss || 0,                             "",       true,  v => v.toFixed(4))}
         ${_diMetricRow("Serving TBT",      baseline.tbt_ms || 0,                           selected.tbt_ms || 0,                           "ms",     true,  v => v.toFixed(2))}
-        ${_diMetricRow("Training TPS",     baseline.train_tps || 0,                        selected.train_tps || 0,                        "tok/s", false, v => v.toFixed(0))}
+        ${_diMetricRow("Training TPS/GPU", baseline.train_tps || 0,                        selected.train_tps || 0,                        "tok/s", false, v => v.toFixed(0))}
         ${_diMetricRow("Memory / GPU",     baseline.mem_gb || 0,                           selected.mem_gb || 0,                           "GB",     true,  v => v.toFixed(2))}
         ${_diMetricRow("KV cache",         baseline.kv_gb || 0,                            selected.kv_gb || 0,                            "GB",     true,  v => v.toFixed(3))}
       </tbody>
@@ -3759,26 +4078,34 @@ function diInfluenceBodyHTML(baseline, selected, frontier, compact) {
 // ======================
 // Tab: Shadow Prices
 // ======================
-function _shadowSiblingAt2T(entry) {
-  // Find the 2T-tokens entry with the same (hw, params, serving, context, arch).
-  // Shadow prices are only computed for 2T cells; non-2T cells reuse them as
-  // the closest anchor.
+function _shadowSiblingWithData(entry) {
+  // Find the nearest entry with shadow data in the same (hw, params,
+  // serving) cell. Shadow prices are computed for the 8k-context anchor
+  // slice of the grid's token count (Wave 44: 20T); other contexts reuse
+  // them as the closest anchor.
   if (!entry || typeof GRID === "undefined") return null;
   const wantCtx = entry.context_length || 8192;
+  const hasSP = g => (g.arch_dim_prices && g.arch_dim_prices.length)
+    || (g.shadow_prices && g.shadow_prices.length);
   return GRID.find(g =>
     g.hw === entry.hw &&
     g.params_B === entry.params_B &&
     g.serving === entry.serving &&
     (g.context_length || 8192) === wantCtx &&
     (g.arch_mode || "dense") === (entry.arch_mode || "dense") &&
-    g.tokens_T === 2.0 &&
-    (g.arch_dim_prices || g.shadow_prices)
+    g.tokens_T === entry.tokens_T &&
+    hasSP(g)
   ) || GRID.find(g =>
     g.hw === entry.hw &&
     g.params_B === entry.params_B &&
     g.serving === entry.serving &&
-    g.tokens_T === 2.0 &&
-    (g.arch_dim_prices || g.shadow_prices)
+    (g.arch_mode || "dense") === (entry.arch_mode || "dense") &&
+    hasSP(g)
+  ) || GRID.find(g =>
+    g.hw === entry.hw &&
+    g.params_B === entry.params_B &&
+    g.serving === entry.serving &&
+    hasSP(g)
   );
 }
 
@@ -3794,18 +4121,18 @@ function renderShadows(entry) {
   const lacksSP = !source || !source.shadow_prices || !source.shadow_prices.length;
   const lacksADP = !source || !source.arch_dim_prices || !source.arch_dim_prices.length;
   if (entry && (lacksSP || lacksADP)) {
-    const sib = _shadowSiblingAt2T(entry);
+    const sib = _shadowSiblingWithData(entry);
     if (sib && (sib.shadow_prices || sib.arch_dim_prices)) {
       source = sib;
-      isFallback = (entry.tokens_T !== 2.0);
+      isFallback = (sib !== entry);
     }
   }
 
   const fallbackNote = isFallback ? `
     <p class="ctrl-note" style="margin:0 0 10px;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:rgba(255,255,255,0.02);">
-      Shadow prices are computed for the 2T-token anchor of this
-      (hardware, params, serving) cell. Showing the 2T data as the closest
-      reference for ${entry.tokens_T}T tokens.
+      Shadow prices are computed for the 8k-context anchor of this
+      (hardware, params, arch) cell. Showing the anchor data as the
+      closest reference for ${(entry.context_label || (entry.context_length || 8192) + " ctx")}.
     </p>` : "";
 
   if (!source || !source.shadow_prices || !source.shadow_prices.length) {
@@ -3890,7 +4217,7 @@ function renderShadows(entry) {
 function renderJustification(entry) {
   const container = document.getElementById("justification-content");
   if (!entry || !entry.justification) {
-    container.innerHTML = `<p style="color:var(--text2);">Justification is generated for 2T token configurations. Select 2T tokens to see it.</p>`;
+    container.innerHTML = `<p style="color:var(--text2);">The long-form justification is generated for the 8k-context anchor slice of the grid. Select the 8k context to see it; other contexts keep the compact optimal + Pareto payload.</p>`;
     return;
   }
   // Simple markdown → HTML
@@ -3916,7 +4243,10 @@ function renderCompare() {
   const groups = [];
 
   hwKeys.forEach(hw => {
-    const entry = lookup(hw, state.params, state.tokens, state.serving);
+    const entry = mergedEntry(
+      hw, state.params, state.tokens, state.serving,
+      activeArchFamilies(), state.contextLength,
+    );
     const info = HW_INFO[hw];
     if (!entry || !entry.optimal) {
       cards.innerHTML += `<div class="card"><h3>${info.label}</h3><p style="color:var(--text2);font-size:13px;">No feasible solution</p></div>`;
@@ -3924,6 +4254,7 @@ function renderCompare() {
       return;
     }
     const o = entry.optimal;
+    const tpsPerGpu = trainTpsPerGpu(o);
     const isActive = hw === state.hw;
     cards.innerHTML += `
       <div class="card" style="${isActive ? 'border-color:var(--accent);' : ''}">
@@ -3931,14 +4262,14 @@ function renderCompare() {
         <div class="metric"><span class="label">d_model × L</span><span class="val">${o.d_model} × ${o.n_layers}</span></div>
         <div class="metric"><span class="label">Params</span><span class="val">${fmtParamCount(o.params_B)}</span></div>
         <div class="metric"><span class="label">Loss</span><span class="val">${o.loss}</span></div>
-        <div class="metric"><span class="label">Training TPS</span><span class="val">${fmtN(o.train_tps)}</span></div>
+        <div class="metric"><span class="label">Training TPS/GPU</span><span class="val">${fmtN(tpsPerGpu)}</span></div>
         <div class="metric"><span class="label">Serving TBT</span><span class="val">${o.tbt_ms}ms</span></div>
         <div class="metric"><span class="label">Memory</span><span class="val">${o.mem_gb}GB</span></div>
         <div class="metric"><span class="label">Feasible</span><span class="val">${entry.feasible}</span></div>
       </div>`;
     groups.push({
       label: info.label.split(" ").pop(),
-      loss: o.loss, tps: o.train_tps / 1000, tbt: o.tbt_ms,
+      loss: o.loss, tps: tpsPerGpu / 1000, tbt: o.tbt_ms,
     });
   });
 
@@ -3947,7 +4278,7 @@ function renderCompare() {
       { key: "tps", color: "#60a5fa" },
       { key: "tbt", color: "#fb923c" },
     ],
-    yLabel: "TPS (k) / TBT (ms)", dec: 1, height: 300,
+    yLabel: "TPS/GPU (k) / TBT (ms)", dec: 1, height: 300,
   });
 }
 

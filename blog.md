@@ -1,6 +1,4 @@
-# AC 算模 
-
-### a Hardware-Aware Architecture Compiler for Transformers
+# AC 算模 - a Hardware-Aware Architecture Compiler for Transformers
 
 Architecture choices are currently made through a mix of convention, scaling laws, intuition, and expensive ablations. But many choices are hardware-coupled: GQA/MLA affects KV bandwidth, width/depth affects latency and parallelism, MoE changes active vs total capacity, precision changes both quality risk and throughput, and hybrid state/attention ratios depend on recall vs memory pressure.
 
@@ -32,9 +30,9 @@ The useful output is not “the optimal architecture.” The useful output is a 
 
 Current implementation looks at: width/depth, MLP-attention ratio, query/KV head split, GQA group size, KV memory, precision policy, MoE active vs total capacity, hybrid state/attention ratio, uncertainty.
 
-- **Attention**: MHA, GQA, MQA, MLA (DeepSeek-V2/V3), NSA (Native Sparse Attention), SWA, YOCO.
+- **Attention**: MHA, GQA, MQA, MLA (DeepSeek-V2/V3), NSA (Native Sparse Attention), CSA, IndexShare, MSA, SWA, YOCO.
 - **FFN**: dense SwiGLU, top-k MoE with shared experts and capacity factors, first-K-dense MoE prefixes (DeepSeek-V3 / Qwen3-MoE style).
-- **State / hybrid layers**: Mamba-2, GLA, KDA, DeltaNet, Gated DeltaNet, parallel-heads, sliding-window recurrent. Five quality-residual families covering the published behaviors of each.
+- **State / hybrid layers**: Mamba-2, GLA, KDA, DeltaNet, Gated DeltaNet, RWKV-7, RetNet, parallel-heads, sliding-window recurrent. Five quality-residual families covering the published behaviors of each.
 - **Long context**: position interpolation, NTK-aware, YaRN, LongRoPE, with their measured long-context degradation multipliers.
 - **Precision**: BF16, FP8 (E4M3/E5M2), FP4 (E2M1), MXFP4, MXFP6, INT8/INT4 KV, per-component assignment.
 - **Multi-token prediction** (DeepSeek-V3-style), 2:4 structured sparsity.
@@ -49,29 +47,24 @@ It is a compiler for proposing and evaluating architecture deltas before expensi
 
 ## Next
 
-The current release is what we're calling "validated throughput-fidelity decision tool." The next milestone is "validated quality-fidelity decision tool" — Phase 2 calibration, which fits the quality model coefficients to controlled 12-arch × 3-scale measurement runs rather than literature priors. After that, lab-local calibration via `ac-auto-calibrate` becomes the standard workflow: bring your own measurements, get a calibration pack tuned to your kernels and your data mix.
+The current release is a pre-calibration architecture decision-support tool: its wiring and physical invariants are tested, but the public-anchor trust audit still blocks publication-grade absolute throughput, latency, memory, and loss claims. The next milestone is measurement calibration, fitting model coefficients to controlled 12-architecture × 3-scale runs rather than literature priors. After that, lab-local calibration via `ac-auto-calibrate` becomes the standard workflow: bring your own measurements, get a calibration pack tuned to your kernels and your data mix.
 
 
 ## :）
-The goal is to make architecture design less like folklore and more like hardware-aware Pareto search.
+The goal is to make architecture design less like folklore and more like hardware-aware multi-objective pareto optimization.
 
 
 
 ## Install
 
 ```bash
-git clone https://github.com/AntheaLi/AC.git
-cd AC
 pip install -e .
 ac-compile --help
 ```
 
-Apache-2.0. Python ≥ 3.10. No runtime dependencies beyond PyYAML.
-
-## Use
 
 ```bash
-# 1) Greenfield: 7B dense on H100
+# Optimal 7B dense architecture for an H100 cluster
 ac-compile \
   --hardware h100 --params 7 --tokens 2 --context 8192 \
   --serving-tbt 50 --serving-batch 32 --tp 8 --pp 1 --dp 8 \
@@ -79,14 +72,14 @@ ac-compile \
   --output-justification out/mistral_arch.md \
   --output-pareto out/mistral_pareto.csv
 
-# 2) Modifier: Pareto-front delta against Mistral-7B
+# Modifier Search: Pareto-front delta against Mistral-7B
 ac-compile \
   --baseline-config configs/mistral_7b.json \
   --hardware h100 --tp-options 4,8 \
   --quality-risk-budget-pct 1.0 --allow-quality-spending \
   --out out/mistral_modifier
 
-# 3) Delta influence: what does GQA(group_size=8) do to Mistral-7B at 32k?
+# Modifier Delta: what does GQA(group_size=8) do to Mistral-7B at 32k?
 ac-delta-eval \
   --baseline-config configs/mistral_7b.json \
   --hardware h100 --tp 8 --workload long_context \
@@ -94,4 +87,4 @@ ac-delta-eval \
   --out out/mistral_delta_gqa
 ```
 
-Repository, full docs at [github.com/AntheaLi/AC](https://github.com/AntheaLi/AC).
+Repository, full docs, and the public-benchmark validation pack at [github.com/AntheaLi/AC](https://github.com/AntheaLi/AC).

@@ -178,6 +178,24 @@ canvas { width: 100%; max-height: 350px; }
 .no-solution h2 { font-size: 18px; color: var(--red); margin-bottom: 8px; }
 .no-solution p { color: var(--text2); font-size: 14px; }
 
+/* Wave 2c family-comparison table */
+.family-card h3 { font-size: 14px; font-weight: 600; margin-bottom: 4px; }
+.family-card .sub { font-size: 12px; color: var(--text2); margin-bottom: 12px; }
+.family-table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; font-size: 13px; }
+.family-table th { text-align: left; color: var(--text2); font-weight: 600; padding: 6px 10px; border-bottom: 1px solid var(--border); }
+.family-table th.num { text-align: right; }
+.family-table td { padding: 8px 10px; border-bottom: 1px solid var(--border); }
+.family-table td.num { text-align: right; }
+.family-table tr.best td { color: var(--accent2); font-weight: 600; }
+.family-table tr.spilled td { color: var(--orange); }
+.family-table tr.spilled td:first-child::after { content: " (spill)"; font-size: 10px; color: var(--orange); margin-left: 4px; }
+.family-table td.delta { color: var(--text2); font-size: 12px; }
+.family-table td.delta.good { color: var(--green); }
+.family-table td.delta.bad { color: var(--orange); }
+.family-table .arch-label { font-weight: 500; }
+.family-table .state-tag { font-size: 10px; color: var(--text2); padding-left: 4px; }
+.family-empty { padding: 24px; text-align: center; color: var(--text2); font-size: 13px; }
+
 /* Penalty bars */
 .pen-bar { margin-bottom: 6px; }
 .pen-bar-label { display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 2px; }
@@ -350,6 +368,36 @@ canvas { width: 100%; max-height: 350px; }
   </div>
 </div>
 
+<div id="coverage-banner" style="max-width:1280px;margin:0 auto 12px;padding:10px 16px;border:1px solid var(--border);border-radius:8px;background:rgba(124,110,240,0.08);color:var(--text2);font-size:12px;line-height:1.5">
+  <strong style="color:var(--accent2)">Search coverage.</strong>
+  All rows below use <strong>20T training tokens</strong> (Chinchilla-scale run).
+  <strong>NVIDIA H100</strong> is searched at high fidelity across the full variant matrix
+  (dense &middot; MoE &middot; hybrid state families &middot; MoE hybrid, all 6 contexts &middot; 8 param targets).
+  <strong>B200, TPU v5p, Trainium 2/3</strong> are searched coarsely — dense &amp; MoE only, no hybrid state families — as a comparison baseline; use H100 rows for detailed picks.
+  Fidelity provenance and search parameters live in <code>compiler-data.json._regen20t</code>.
+  <span id="coverage-meta" style="display:block;margin-top:4px;color:var(--text2);opacity:.72"></span>
+</div>
+<script>
+  // Populate the coverage banner from the payload's provenance block once
+  // the data chunks have loaded (data-loader.js runs synchronously after
+  // the chunks, so DATA is defined by the time this inline script fires).
+  document.addEventListener("DOMContentLoaded", function () {
+    try {
+      var p = (window.DATA && window.DATA._regen20t) || null;
+      if (!p) return;
+      var fid = p.search_fidelity_by_hw || {};
+      var parts = Object.keys(fid).map(function (hw) {
+        var m = fid[hw]; var s = Object.keys(m).map(function (k) {
+          return k + " x" + m[k]; }).join(", ");
+        return hw + ": " + s;
+      });
+      var el = document.getElementById("coverage-meta");
+      if (el) el.textContent = "Generated " + p.generated +
+        " &middot; search fidelity: " + parts.join(" | ");
+    } catch (e) { /* banner is optional */ }
+  });
+</script>
+
 <div class="main">
   <!-- Sidebar: Controls -->
   <div class="sidebar">
@@ -366,8 +414,9 @@ canvas { width: 100%; max-height: 350px; }
       <select id="sel-tokens"></select>
     </div>
     <div class="ctrl-group">
-      <label>Serving Constraint</label>
+      <label>Serving Constraint <span style="font-weight: 400; color: var(--text2); text-transform: none; letter-spacing: 0;">(legacy)</span></label>
       <select id="sel-serving"></select>
+      <div class="ctrl-note">Categorical regimes are being retired (Wave 2a). Serving cost is reported continuously in the Architecture-family comparison card below.</div>
     </div>
     <div class="ctrl-group">
       <label>Feed-Forward Layers</label>
@@ -380,13 +429,11 @@ canvas { width: 100%; max-height: 350px; }
       <div style="font-size:10px;color:var(--text2);margin-top:4px;line-height:1.4">Transformer: all layers use self-attention. Hybrid: some layers replaced with a state mechanism (Mamba-2, Gated DeltaNet, KDA, GLA, Sliding Window, ...) — less KV cache.</div>
     </div>
 
-    <!-- Serving Context Length picker. Drives the per-grid-entry filter.
-         Non-8k rows are projection/extrapolation rows unless regenerated
-         through a native context sweep. -->
+    <!-- Serving Context Length picker. Drives the per-grid-entry filter. -->
     <div class="ctrl-group">
       <label>Serving Context</label>
       <div class="param-pills" id="ctx-pills"></div>
-      <div style="font-size:10px;color:var(--text2);margin-top:4px;line-height:1.4">8k dense rows are native optimizer outputs. Longer contexts are scaled projections unless marked otherwise; infeasible HBM/TBT/TTFT points are filtered before display.</div>
+      <div style="font-size:10px;color:var(--text2);margin-top:4px;line-height:1.4">All six contexts are native joint-search outputs with one architecture shape pinned across contexts. Points outside the selected serving limits are filtered before display.</div>
     </div>
 
     <!-- v1-fix UI (a): Tradeoff Preference panel. Picks the AC-Optimal winner
@@ -400,8 +447,9 @@ canvas { width: 100%; max-height: 350px; }
         <div id="pref-sliders" style="display:none;font-size:11px;">
           <div class="pref-row" data-axis="loss"><span class="pref-label">Loss-proxy</span><input type="range" id="pref-loss" min="0" max="100" value="100" /><span class="pref-val" id="pref-loss-val">1.00</span></div>
           <div class="pref-row" data-axis="tbt"><span class="pref-label">Decode TBT</span><input type="range" id="pref-tbt" min="0" max="100" value="0" /><span class="pref-val" id="pref-tbt-val">0.00</span></div>
+          <div class="pref-row" data-axis="ttft"><span class="pref-label">Prefill TTFT</span><input type="range" id="pref-ttft" min="0" max="100" value="0" /><span class="pref-val" id="pref-ttft-val">0.00</span></div>
           <div class="pref-row" data-axis="tps"><span class="pref-label">Train TPS</span><input type="range" id="pref-tps" min="0" max="100" value="0" /><span class="pref-val" id="pref-tps-val">0.00</span></div>
-          <div class="pref-row" data-axis="mem"><span class="pref-label">HBM / GPU</span><input type="range" id="pref-mem" min="0" max="100" value="0" /><span class="pref-val" id="pref-mem-val">0.00</span></div>
+          <div class="pref-row" data-axis="mem"><span class="pref-label">Serving HBM footprint</span><input type="range" id="pref-mem" min="0" max="100" value="0" /><span class="pref-val" id="pref-mem-val">0.00</span></div>
           <div class="pref-row" data-axis="params"><span class="pref-label">Total params</span><input type="range" id="pref-params" min="0" max="100" value="0" /><span class="pref-val" id="pref-params-val">0.00</span></div>
         </div>
       </div>
@@ -443,6 +491,8 @@ canvas { width: 100%; max-height: 350px; }
         <div class="card" id="optimal-card"></div>
         <div class="card" id="perf-card"></div>
       </div>
+      <!-- Wave 2c: family comparison (loss vs TBT/TTFT/mem across arch families) -->
+      <div class="card" id="family-card" style="margin-bottom: 20px;"></div>
       <div class="card" id="penalty-card" style="margin-bottom: 20px;"></div>
       <div class="card" id="arch-visual"></div>
     </div>
@@ -453,8 +503,9 @@ canvas { width: 100%; max-height: 350px; }
         <div>
           <label style="display:block;font-size:11px;color:var(--text2);text-transform:uppercase;margin-bottom:6px;">X Axis</label>
           <select id="pareto-x">
-            <option value="train_tps">Training TPS</option>
+            <option value="train_tps">Training TPS/GPU</option>
             <option value="tbt_ms">Serving TBT</option>
+            <option value="ttft_ms">Serving TTFT</option>
             <option value="mem_gb">Memory/GPU</option>
             <option value="param_cost_B">Parameter cost</option>
           </select>
@@ -464,8 +515,9 @@ canvas { width: 100%; max-height: 350px; }
           <select id="pareto-y">
             <option value="loss">Loss Proxy</option>
             <option value="tbt_ms">Serving TBT</option>
+            <option value="ttft_ms">Serving TTFT</option>
             <option value="mem_gb">Memory/GPU</option>
-            <option value="train_tps">Training TPS</option>
+            <option value="train_tps">Training TPS/GPU</option>
           </select>
         </div>
         <div>
@@ -606,7 +658,7 @@ canvas { width: 100%; max-height: 350px; }
       <h3 style="font-size:14px;margin-bottom:10px;color:var(--accent2);">Architecture Dimension Perturbation</h3>
       <p class="ctrl-note" style="margin-bottom:12px;">What happens if you perturb each dimension of the optimal architecture? Each row shows the marginal cost/benefit of a single change.</p>
       <div id="arch-dim-table"></div>
-      <p class="ctrl-note" style="margin-top:12px;">Available for 2T token configurations. Constraint perturbation requires optimizer re-runs and is computed for select configurations.</p>
+      <p class="ctrl-note" style="margin-top:12px;">Available for the 8k-context anchor slice of the 20T grid (H100). Constraint perturbation requires optimizer re-runs and is computed for select configurations.</p>
     </div>
 
     <!-- Justification -->
@@ -889,4 +941,4 @@ canvas { width: 100%; max-height: 350px; }
 <script src="compiler-data-003.js"></script>
 <script src="compiler-data-004.js"></script>
 <script src="data-loader.js"></script>
-<script src="app.js?v=mla-data-1"></script>
+<script src="app.js?v=wave47-compact"></script>

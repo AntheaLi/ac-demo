@@ -1,0 +1,35 @@
+params_B,tokens_T,context,winner,winner_loss,winner_tbt_ms,winner_ttft_ms,winner_mem_gb,winner_tp,spill_tier,runner_up,runner_loss_delta_pct,runner_tbt_delta_pct,plateau_with
+1.0,20.0,8k,hybrid (swa),2.1787,2.0,41,1.3,8,fits,dense,-0.23,15.0,dense
+1.0,20.0,32k,hybrid (swa),2.1814,2.0,115,4.6,8,fits,dense,-0.36,95.0,dense
+1.0,20.0,128k,hybrid (swa),2.1843,2.0,412,17.4,8,fits,dense,-0.37,415.0,dense
+1.0,20.0,1M,hybrid (swa),2.1888,1.9,3179,68.9,8,fits,dense,0.44,884.2,dense
+1.0,20.0,2M,hybrid (swa),2.1902,1.9,6341,68.9,8,fits,dense,0.71,884.2,dense
+1.0,20.0,4M,hybrid (swa),2.1917,1.9,12666,68.9,8,fits,dense,0.98,884.2,dense
+3.0,20.0,8k,MoE,2.0452,12.5,96,12.7,1,fits,dense,1.53,-75.2,
+3.0,20.0,32k,MoE,2.0462,12.5,167,15.2,1,fits,dense,1.53,-75.2,
+3.0,20.0,128k,MoE,2.0601,15.1,618,25.0,1,fits,dense,1.52,-76.8,moe_hybrid(sliding_window)
+3.0,20.0,1M,MoE,2.081,30.3,4825,64.5,1,fits,dense,1.51,-87.5,moe_hybrid(sliding_window)
+3.0,20.0,2M,MoE,2.088,30.2,9633,64.4,1,fits,dense,1.5,-87.7,moe_hybrid(sliding_window)
+3.0,20.0,4M,MoE,2.0949,27.7,19250,64.3,1,fits,dense,1.5,-86.6,moe_hybrid(sliding_window)
+7.0,20.0,8k,MoE,2.0193,19.2,282,19.5,2,fits,dense,1.12,-75.0,dense
+7.0,20.0,32k,MoE,2.0193,27.2,394,25.1,2,fits,MoE-hybrid (swa),0.93,34.6,hybrid(sliding_window)
+7.0,20.0,128k,MoE,2.0354,59.0,4708,47.4,2,fits,MoE-hybrid (swa),0.14,45.9,moe_hybrid(sliding_window)
+7.0,20.0,1M,MoE-hybrid (swa),2.0455,77.5,43058,61.6,1,fits,MoE-hybrid (gd),0.06,0.0,moe
+7.0,20.0,2M,MoE-hybrid (swa),2.0491,74.2,160458,61.6,1,fits,MoE-hybrid (gd),0.06,0.0,hybrid(sliding_window)
+7.0,20.0,4M,MoE-hybrid (swa),2.0531,72.6,618338,61.6,1,fits,MoE-hybrid (gd),0.06,0.0,hybrid(sliding_window)
+13.0,20.0,8k,dense,2.015,13.3,142,9.7,4,fits,MoE,-0.22,8.3,moe
+13.0,20.0,32k,MoE,2.0116,14.4,169,22.4,2,fits,MoE-hybrid (swa),-0.34,38.9,moe_hybrid(sliding_window)
+13.0,20.0,128k,MoE-hybrid (swa),2.0058,33.9,1500,51.0,2,fits,MoE-hybrid (gd),0.07,0.0,hybrid(sliding_window)
+13.0,20.0,1M,MoE-hybrid (swa),2.0138,32.8,64166,51.0,2,fits,MoE-hybrid (gd),0.07,0.0,hybrid(sliding_window)
+13.0,20.0,2M,MoE-hybrid (swa),2.0176,27.5,247821,51.0,2,fits,MoE-hybrid (gd),0.07,0.0,hybrid(sliding_window)
+13.0,20.0,4M,hybrid (swa),2.0309,48.7,1081182,71.9,2,fits,hybrid (gd),0.02,0.0,moe_hybrid(sliding_window)
+120.0,20.0,8k,dense,1.9417,33.4,340,13.6,8,fits,hybrid (gd),0.27,19.2,moe
+120.0,20.0,32k,hybrid (gd),1.9315,42.3,414,29.3,8,fits,hybrid (gla),0.0,0.0,moe
+120.0,20.0,128k,hybrid (gd),1.9229,30.9,2033,44.0,8,fits,hybrid (gla),0.0,0.0,moe_hybrid(gated_delta)
+120.0,20.0,1M,hybrid (gd),1.9197,29.3,48425,44.0,8,fits,hybrid (gla),0.0,0.0,
+120.0,20.0,2M,hybrid (gd),1.9204,29.2,170645,44.0,8,fits,hybrid (gla),0.0,0.0,
+120.0,20.0,4M,dense,2.0389,34.6,38385,62.1,8,fits,,,,
+500.0,20.0,8k,dense,1.9063,98.1,950,38.1,16,fits,MoE,14.15,47.3,hybrid(gated_delta)
+500.0,20.0,32k,dense,1.9054,91.8,4011,53.8,16,fits,MoE,14.25,47.1,moe_hybrid(sliding_window)
+500.0,20.0,128k,dense,1.9205,83.3,19365,53.8,16,fits,MoE,14.01,-54.1,
+500.0,20.0,1M,MoE,2.2083,1592.5,167330,753.7,16,mixed,,,,
